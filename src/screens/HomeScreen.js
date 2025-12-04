@@ -69,6 +69,31 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
+  // Add this specific function to handle the API call
+  const deletePassenger = async (id) => {
+    Alert.alert(
+      "Delete Passenger",
+      "Are you sure you want to remove this passenger permanently?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Call the new DELETE endpoint
+              await fetch(`${API_URL}/${id}`, { method: "DELETE" });
+              // Refresh the list to show they are gone
+              fetchPassengers();
+            } catch (error) {
+              Alert.alert("Error", "Could not delete passenger");
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const renderPassenger = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
     return (
@@ -78,16 +103,35 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.address}>{item.address}</Text>
           <Text style={styles.type}>{item.type}</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => togglePassenger(item.id)}
-          style={[styles.addButton, isSelected && styles.removeButton]}
-        >
-          <Ionicons
-            name={isSelected ? "remove" : "add"}
-            size={24}
-            color="white"
-          />
-        </TouchableOpacity>
+
+        {/* Action Buttons Row */}
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          {/* 1. DELETE BUTTON (Trash) */}
+          <TouchableOpacity
+            onPress={() => deletePassenger(item.id)}
+            style={[
+              styles.actionButton,
+              { backgroundColor: "#FF5252", marginRight: 10 },
+            ]}
+          >
+            <Ionicons name="trash" size={20} color="white" />
+          </TouchableOpacity>
+
+          {/* 2. SELECT BUTTON (+/-) */}
+          <TouchableOpacity
+            onPress={() => togglePassenger(item.id)}
+            style={[
+              styles.actionButton,
+              { backgroundColor: isSelected ? "#4CAF50" : "#2196F3" },
+            ]}
+          >
+            <Ionicons
+              name={isSelected ? "checkmark" : "add"}
+              size={24}
+              color="white"
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     );
   };
@@ -212,4 +256,17 @@ const styles = StyleSheet.create({
   },
   disabledButton: { backgroundColor: "#CCC" },
   optimizeText: { color: "white", fontWeight: "bold", marginRight: 5 },
+  // ... other styles ...
+  actionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    elevation: 2,
+  },
+  // ... footer styles ...
 });
