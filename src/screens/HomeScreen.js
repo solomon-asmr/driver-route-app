@@ -6,6 +6,7 @@ import {
   FlatList,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -15,12 +16,25 @@ import {
 // ---------------------------------------------------------
 const API_URL = "http://10.21.70.38:3000/passengers";
 
+// ---------------------------------------------------------
+// REPLACE THIS WITH YOUR COMPUTER'S IP ADDRESS!
+// ---------------------------------------------------------
+
+// ---------------------------------------------------------
+// REPLACE THIS WITH YOUR COMPUTER'S IP ADDRESS!
+// ---------------------------------------------------------
+
 export default function HomeScreen({ navigation }) {
   const [passengers, setPassengers] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 1. Setup the "Add (+)" Button in the header
+  // Destination State
+  const [destinationAddress, setDestinationAddress] = useState(
+    "Azrieli Center, Tel Aviv"
+  );
+  const [processingRoute, setProcessingRoute] = useState(false);
+
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
@@ -36,7 +50,6 @@ export default function HomeScreen({ navigation }) {
     });
   }, [navigation]);
 
-  // 2. Refresh data when screen loads or when coming back from "Add" screen
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
       fetchPassengers();
@@ -61,15 +74,6 @@ export default function HomeScreen({ navigation }) {
     }
   };
 
-  const togglePassenger = (id) => {
-    if (selectedIds.includes(id)) {
-      setSelectedIds(selectedIds.filter((pid) => pid !== id));
-    } else {
-      setSelectedIds([...selectedIds, id]);
-    }
-  };
-
-  // Add this specific function to handle the API call
   const deletePassenger = async (id) => {
     Alert.alert(
       "Delete Passenger",
@@ -81,9 +85,7 @@ export default function HomeScreen({ navigation }) {
           style: "destructive",
           onPress: async () => {
             try {
-              // Call the new DELETE endpoint
               await fetch(`${API_URL}/${id}`, { method: "DELETE" });
-              // Refresh the list to show they are gone
               fetchPassengers();
             } catch (error) {
               Alert.alert("Error", "Could not delete passenger");
@@ -92,6 +94,70 @@ export default function HomeScreen({ navigation }) {
         },
       ]
     );
+  };
+
+  const togglePassenger = (id) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter((pid) => pid !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
+    }
+  };
+
+  const getCoordinates = async (address) => {
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+        address
+      )}`;
+      const response = await fetch(url, {
+        headers: { "User-Agent": "DriverApp/1.0" },
+      });
+      const data = await response.json();
+      if (data && data.length > 0) {
+        return {
+          lat: parseFloat(data[0].lat),
+          lng: parseFloat(data[0].lon),
+          name: "Finish: " + address,
+        };
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const handleOptimize = async () => {
+    if (selectedIds.length === 0) {
+      Alert.alert("No Passengers", "Please select at least one passenger.");
+      return;
+    }
+    if (!destinationAddress.trim()) {
+      Alert.alert("Missing Destination", "Please enter a destination address.");
+      return;
+    }
+
+    setProcessingRoute(true);
+
+    const destinationCoords = await getCoordinates(destinationAddress);
+
+    setProcessingRoute(false);
+
+    if (!destinationCoords) {
+      Alert.alert(
+        "Address Not Found",
+        "Could not find location for: " + destinationAddress
+      );
+      return;
+    }
+
+    const selectedPassengers = passengers.filter((p) =>
+      selectedIds.includes(p.id)
+    );
+
+    navigation.navigate("Map", {
+      passengersToRoute: selectedPassengers,
+      finalDestination: destinationCoords,
+    });
   };
 
   const renderPassenger = ({ item }) => {
@@ -103,10 +169,7 @@ export default function HomeScreen({ navigation }) {
           <Text style={styles.address}>{item.address}</Text>
           <Text style={styles.type}>{item.type}</Text>
         </View>
-
-        {/* Action Buttons Row */}
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* 1. DELETE BUTTON (Trash) */}
           <TouchableOpacity
             onPress={() => deletePassenger(item.id)}
             style={[
@@ -116,8 +179,6 @@ export default function HomeScreen({ navigation }) {
           >
             <Ionicons name="trash" size={20} color="white" />
           </TouchableOpacity>
-
-          {/* 2. SELECT BUTTON (+/-) */}
           <TouchableOpacity
             onPress={() => togglePassenger(item.id)}
             style={[
@@ -138,8 +199,20 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Today's Passengers</Text>
+      <Text style={styles.header}>Today's Route</Text>
 
+      {/* 1. TOP SECTION: Destination Input */}
+      <View style={styles.topSection}>
+        <Text style={styles.label}>Final Destination:</Text>
+        <TextInput
+          style={styles.input}
+          value={destinationAddress}
+          onChangeText={setDestinationAddress}
+          placeholder="e.g. Factory, Airport..."
+        />
+      </View>
+
+      {/* 2. MIDDLE SECTION: List of Passengers */}
       {loading ? (
         <ActivityIndicator
           size="large"
@@ -157,33 +230,27 @@ export default function HomeScreen({ navigation }) {
         />
       )}
 
+      {/* 3. BOTTOM SECTION: Action Button */}
       <View style={styles.footer}>
-        <Text style={styles.summaryText}>
-          {selectedIds.length} Passengers Selected
-        </Text>
+        <Text style={styles.summaryText}>{selectedIds.length} Selected</Text>
+
         <TouchableOpacity
           style={[
             styles.optimizeButton,
-            selectedIds.length === 0 && styles.disabledButton,
+            (selectedIds.length === 0 || processingRoute) &&
+              styles.disabledButton,
           ]}
-          onPress={() => {
-            if (selectedIds.length === 0) {
-              Alert.alert(
-                "No Passengers",
-                "Please select at least one passenger."
-              );
-            } else {
-              const selectedPassengers = passengers.filter((p) =>
-                selectedIds.includes(p.id)
-              );
-              navigation.navigate("Map", {
-                passengersToRoute: selectedPassengers,
-              });
-            }
-          }}
+          onPress={handleOptimize}
+          disabled={processingRoute}
         >
-          <Text style={styles.optimizeText}>Optimize Route</Text>
-          <Ionicons name="arrow-forward" size={20} color="white" />
+          {processingRoute ? (
+            <ActivityIndicator color="white" size="small" />
+          ) : (
+            <>
+              <Text style={styles.optimizeText}>Optimize Route</Text>
+              <Ionicons name="arrow-forward" size={20} color="white" />
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </View>
@@ -191,7 +258,7 @@ export default function HomeScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#F5F5F5", paddingTop: 20 },
+  container: { flex: 1, backgroundColor: "#F5F5F5", paddingTop: 10 },
   header: {
     fontSize: 22,
     fontWeight: "bold",
@@ -199,7 +266,32 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     color: "#333",
   },
+
+  // Top Input Styles
+  topSection: {
+    backgroundColor: "white",
+    marginHorizontal: 15,
+    marginBottom: 10,
+    padding: 15,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  label: { fontSize: 14, fontWeight: "bold", marginBottom: 5, color: "#555" },
+  input: {
+    backgroundColor: "#F9F9F9",
+    borderWidth: 1,
+    borderColor: "#DDD",
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 16,
+  },
+
   listContent: { paddingBottom: 100, paddingHorizontal: 15 },
+
   card: {
     backgroundColor: "white",
     borderRadius: 12,
@@ -223,15 +315,19 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "bold", color: "#333" },
   address: { fontSize: 14, color: "#666", marginTop: 2 },
   type: { fontSize: 12, color: "#999", marginTop: 4, fontStyle: "italic" },
-  addButton: {
-    backgroundColor: "#2196F3",
+  actionButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    elevation: 2,
   },
-  removeButton: { backgroundColor: "#FF5252" },
+
+  // Footer Styles (Only for button now)
   footer: {
     position: "absolute",
     bottom: 0,
@@ -244,6 +340,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    elevation: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
   },
   summaryText: { fontSize: 16, fontWeight: "600" },
   optimizeButton: {
@@ -256,17 +356,4 @@ const styles = StyleSheet.create({
   },
   disabledButton: { backgroundColor: "#CCC" },
   optimizeText: { color: "white", fontWeight: "bold", marginRight: 5 },
-  // ... other styles ...
-  actionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    elevation: 2,
-  },
-  // ... footer styles ...
 });
