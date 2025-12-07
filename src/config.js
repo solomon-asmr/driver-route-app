@@ -1,6 +1,2 @@
-// src/config.js
-
-// CHANGE THIS ONE IP TO UPDATE THE WHOLE APP
-const IP_ADDRESS = "10.14.40.38";
-
-export const API_URL = `http://${IP_ADDRESS}:3000`;
+// This connects your app to the live Cloud Server
+export const API_URL = "https://driver-backend-80d4.onrender.com";
