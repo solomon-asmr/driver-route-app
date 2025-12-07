@@ -1,5 +1,6 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import SignupScreen from "./src/screens/SignupScreen";
 // 1. IMPORT THE PROVIDER (Critical for Safe Area)
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
@@ -54,6 +55,11 @@ export default function App() {
             name="Import"
             component={ImportScreen}
             options={{ title: "Import Route" }}
+          />
+          <Stack.Screen
+            name="Signup"
+            component={SignupScreen}
+            options={{ headerShown: false }}
           />
         </Stack.Navigator>
       </NavigationContainer>

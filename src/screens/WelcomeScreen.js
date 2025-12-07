@@ -2,7 +2,6 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   Image,
   Platform,
-  SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
@@ -17,78 +16,81 @@ export default function WelcomeScreen({ navigation }) {
   // 2. GET THE INSETS
   const insets = useSafeAreaInsets();
 
+  // 3. NAVIGATION HANDLERS
   const handleGetStarted = () => {
-    // Both buttons go to Login, but 'Get Started' implies creating an account
-    // Our LoginScreen handles both, so we just navigate there.
-    navigation.replace("Login");
+    // New User -> Go to Signup
+    navigation.navigate("Signup");
+  };
+
+  const handleLogin = () => {
+    // Existing User -> Go to Login
+    navigation.navigate("Login");
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    // 4. USE VIEW WITH DYNAMIC PADDING (Replaces SafeAreaView for better control)
+    <View
+      style={[
+        styles.container,
+        {
+          paddingTop: Platform.OS === "android" ? 30 : insets.top, // Handle Status Bar
+          paddingBottom: 20 + insets.bottom, // Lift buttons above Swipe Bar
+        },
+      ]}
+    >
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
-      {/* 3. APPLY DYNAMIC PADDING TO CONTAINER */}
-      <View
-        style={[
-          styles.container,
-          { paddingBottom: 20 + insets.bottom }, // Lifts buttons up above the swipe bar
-        ]}
-      >
-        {/* 1. HERO VISUAL & BRANDING */}
-        <View style={styles.heroSection}>
-          <View style={styles.logoBox}>
-            <Image
-              source={require("../../assets/logo.png")}
-              style={styles.logoImage}
-            />
-          </View>
-
-          <Text style={styles.appTitle}>
-            Navi<Text style={{ color: COLORS.primary }}>Go</Text>
-          </Text>
-          <Text style={styles.tagline}>Smart routes. Faster rides.</Text>
-
-          <Text style={styles.description}>
-            Plan the shortest route to pick up all passengers — automatically.
-          </Text>
-        </View>
-
-        {/* 2. KEY BENEFITS */}
-        <View style={styles.benefitsContainer}>
-          <BenefitRow
-            icon="car-sport"
-            text="Optimized routes – save time & fuel"
+      {/* 1. HERO VISUAL & BRANDING */}
+      <View style={styles.heroSection}>
+        <View style={styles.logoBox}>
+          <Image
+            source={require("../../assets/logo.png")}
+            style={styles.logoImage}
           />
-          <BenefitRow icon="map" text="Multiple pickups – one smart path" />
-          <BenefitRow icon="flash" text="One-tap navigation" />
         </View>
 
-        {/* 3. PRIMARY ACTIONS (Bottom) */}
-        <View style={styles.footer}>
-          {/* Primary Button */}
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={handleGetStarted}
-          >
-            <Text style={styles.primaryButtonText}>Get Started</Text>
-            <Ionicons
-              name="arrow-forward"
-              size={20}
-              color="white"
-              style={{ marginLeft: 10 }}
-            />
-          </TouchableOpacity>
+        <Text style={styles.appTitle}>
+          Navi<Text style={{ color: COLORS.primary }}>Go</Text>
+        </Text>
+        <Text style={styles.tagline}>Smart routes. Faster rides.</Text>
 
-          {/* Secondary Button */}
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={handleGetStarted}
-          >
-            <Text style={styles.secondaryButtonText}>Log In</Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.description}>
+          Plan the shortest route to pick up all passengers — automatically.
+        </Text>
       </View>
-    </SafeAreaView>
+
+      {/* 2. KEY BENEFITS */}
+      <View style={styles.benefitsContainer}>
+        <BenefitRow
+          icon="car-sport"
+          text="Optimized routes – save time & fuel"
+        />
+        <BenefitRow icon="map" text="Multiple pickups – one smart path" />
+        <BenefitRow icon="flash" text="One-tap navigation" />
+      </View>
+
+      {/* 3. PRIMARY ACTIONS (Bottom) */}
+      <View style={styles.footer}>
+        {/* Primary Button -> Signup */}
+        <TouchableOpacity
+          style={styles.primaryButton}
+          onPress={handleGetStarted}
+        >
+          <Text style={styles.primaryButtonText}>Get Started</Text>
+          <Ionicons
+            name="arrow-forward"
+            size={20}
+            color="white"
+            style={{ marginLeft: 10 }}
+          />
+        </TouchableOpacity>
+
+        {/* Secondary Button -> Login */}
+        <TouchableOpacity style={styles.secondaryButton} onPress={handleLogin}>
+          <Text style={styles.secondaryButtonText}>Log In</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -103,20 +105,16 @@ const BenefitRow = ({ icon, text }) => (
 );
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-    paddingTop: Platform.OS === "android" ? 30 : 0,
-  },
   container: {
     flex: 1,
+    backgroundColor: COLORS.background,
     paddingHorizontal: 24,
     justifyContent: "space-between",
-    // paddingBottom: 40, <--- REMOVED (Handled dynamically in JSX)
+    // Note: Padding Top/Bottom are handled dynamically in JSX
   },
 
   // --- HERO SECTION ---
-  heroSection: { alignItems: "center", marginTop: 40 },
+  heroSection: { alignItems: "center", marginTop: 20 },
 
   logoBox: {
     width: 140,

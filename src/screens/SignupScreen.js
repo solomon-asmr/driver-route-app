@@ -3,7 +3,6 @@ import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
@@ -18,7 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
-export default function LoginScreen({ navigation }) {
+export default function SignupScreen({ navigation }) {
   // 2. GET INSETS
   const insets = useSafeAreaInsets();
 
@@ -26,24 +25,32 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleSignUp = async () => {
+    if (!email || !password) {
+      Alert.alert("Missing Info", "Please enter both email and password.");
+      return;
+    }
+
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signUp({
       email: email,
       password: password,
     });
 
     if (error) {
-      Alert.alert("Login Failed", error.message);
-      setLoading(false);
+      Alert.alert("Sign Up Failed", error.message);
     } else {
-      // Success! Go to Home
-      navigation.replace("Home");
+      Alert.alert(
+        "Success!",
+        "Account created! Please check your email to confirm.",
+        [{ text: "OK", onPress: () => navigation.replace("Login") }]
+      );
     }
+    setLoading(false);
   };
 
   return (
-    // 3. SAFE AREA VIEW REPLACEMENT
+    // 3. SAFE AREA FIX: Dynamic Top Padding
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
@@ -51,10 +58,10 @@ export default function LoginScreen({ navigation }) {
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.keyboardView}
       >
-        {/* HEADER WITH BACK BUTTON */}
+        {/* HEADER */}
         <View style={[styles.header, { marginTop: 10 }]}>
           <TouchableOpacity
-            onPress={() => navigation.replace("Welcome")}
+            onPress={() => navigation.navigate("Welcome")}
             style={styles.backBtn}
           >
             <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
@@ -62,20 +69,20 @@ export default function LoginScreen({ navigation }) {
         </View>
 
         <View style={styles.contentContainer}>
-          {/* LOGO - Now styled exactly like Welcome Screen (Rounded Box) */}
-          <View style={styles.logoContainer}>
-            <View style={styles.logoBox}>
-              <Image
-                source={require("../../assets/logo.png")}
-                style={styles.logoImage}
-              />
+          {/* HERO TEXT */}
+          <View style={styles.titleContainer}>
+            <View style={styles.iconCircle}>
+              <Ionicons name="person-add" size={32} color={COLORS.primary} />
             </View>
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+            <Text style={styles.title}>Create Account</Text>
+            <Text style={styles.subtitle}>
+              Start optimizing your routes today.
+            </Text>
           </View>
 
           {/* FORM */}
           <View style={styles.form}>
+            <Text style={styles.label}>EMAIL</Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="mail-outline"
@@ -85,7 +92,7 @@ export default function LoginScreen({ navigation }) {
               />
               <TextInput
                 style={styles.input}
-                placeholder="Email Address"
+                placeholder="driver@example.com"
                 placeholderTextColor={COLORS.textSub}
                 value={email}
                 onChangeText={setEmail}
@@ -94,6 +101,7 @@ export default function LoginScreen({ navigation }) {
               />
             </View>
 
+            <Text style={styles.label}>PASSWORD</Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="lock-closed-outline"
@@ -103,7 +111,7 @@ export default function LoginScreen({ navigation }) {
               />
               <TextInput
                 style={styles.input}
-                placeholder="Password"
+                placeholder="Minimum 6 characters"
                 placeholderTextColor={COLORS.textSub}
                 value={password}
                 onChangeText={setPassword}
@@ -112,28 +120,27 @@ export default function LoginScreen({ navigation }) {
             </View>
 
             <TouchableOpacity
-              style={[styles.loginBtn, loading && styles.disabledBtn]}
-              onPress={handleLogin}
+              style={[styles.signupBtn, loading && styles.disabledBtn]}
+              onPress={handleSignUp}
               disabled={loading}
             >
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.loginText}>Log In</Text>
+                <Text style={styles.signupText}>Create Account</Text>
               )}
             </TouchableOpacity>
 
             <View style={styles.footerRow}>
-              <Text style={styles.footerText}>New here? </Text>
-              {/* FIXED: Now navigates to the Create Account Page */}
-              <TouchableOpacity onPress={() => navigation.navigate("Signup")}>
-                <Text style={styles.signupText}>Create Account</Text>
+              <Text style={styles.footerText}>Already have an account? </Text>
+              <TouchableOpacity onPress={() => navigation.replace("Login")}>
+                <Text style={styles.loginLink}>Log In</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* Dynamic padding at bottom */}
+        {/* 4. SAFE AREA FIX: Dynamic Bottom Padding */}
         <View style={{ height: 20 + insets.bottom }} />
       </KeyboardAvoidingView>
     </View>
@@ -144,14 +151,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    // paddingTop handled in JSX
   },
   keyboardView: { flex: 1, paddingHorizontal: 24 },
 
-  header: {
-    alignItems: "flex-start",
-    marginBottom: 20,
-  },
+  header: { alignItems: "flex-start", marginBottom: 20 },
   backBtn: {
     padding: 8,
     borderRadius: 12,
@@ -162,31 +165,36 @@ const styles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     justifyContent: "center",
-    paddingBottom: 50,
+    paddingBottom: 60,
   },
 
-  logoContainer: { alignItems: "center", marginBottom: 40 },
-
-  // NEW: Styled Logo Box (Matches Welcome Screen Style)
-  logoBox: {
-    width: 100,
-    height: 100,
-    borderRadius: 25, // Makes it a "Squircle"
-    overflow: "hidden", // Cuts off the sharp corners of the image
-    backgroundColor: "white",
-    marginBottom: 20,
-    ...SHADOWS.medium, // Adds the nice drop shadow
+  titleContainer: { alignItems: "center", marginBottom: 40 },
+  iconCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#DBEAFE",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 15,
   },
-  logoImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-
   title: { fontSize: 28, fontWeight: "bold", color: COLORS.textMain },
-  subtitle: { fontSize: 16, color: COLORS.textSub, marginTop: 5 },
+  subtitle: {
+    fontSize: 16,
+    color: COLORS.textSub,
+    marginTop: 5,
+    textAlign: "center",
+  },
 
   form: { width: "100%" },
+  label: {
+    fontSize: 12,
+    fontWeight: "bold",
+    color: COLORS.textSub,
+    marginBottom: 8,
+    marginTop: 10,
+    letterSpacing: 1,
+  },
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
@@ -194,24 +202,23 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     height: 60,
     paddingHorizontal: 15,
-    marginBottom: 15,
     borderWidth: 1,
     borderColor: COLORS.border,
     ...SHADOWS.small,
   },
   input: { flex: 1, fontSize: 16, color: COLORS.textMain, height: "100%" },
 
-  loginBtn: {
+  signupBtn: {
     backgroundColor: COLORS.primary,
     height: 60,
     borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 30,
     ...SHADOWS.medium,
   },
   disabledBtn: { backgroundColor: "#9CA3AF" },
-  loginText: { color: "white", fontSize: 18, fontWeight: "bold" },
+  signupText: { color: "white", fontSize: 18, fontWeight: "bold" },
 
   footerRow: {
     flexDirection: "row",
@@ -219,5 +226,5 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   footerText: { color: COLORS.textSub, fontSize: 15 },
-  signupText: { color: COLORS.primary, fontSize: 15, fontWeight: "bold" },
+  loginLink: { color: COLORS.primary, fontSize: 15, fontWeight: "bold" },
 });
