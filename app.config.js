@@ -9,7 +9,7 @@ export default {
     icon: "./assets/logo.png",
     userInterfaceStyle: "light",
     splash: {
-      image: "./assets/splash.png",
+      image: "./assets/logo.png",
       resizeMode: "contain",
       backgroundColor: "#ffffff",
     },
@@ -19,7 +19,7 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/logo.png",
+        foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#ffffff",
       },
       package: "com.solomon.navigo",
