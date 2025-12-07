@@ -6,7 +6,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
-  ScrollView, // <--- NEW: Import ScrollView
+  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -14,11 +14,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// 1. IMPORT THE HOOK
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function AddPassengerScreen({ navigation }) {
+  // 2. GET THE INSETS
+  const insets = useSafeAreaInsets();
+
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
@@ -144,8 +149,13 @@ export default function AddPassengerScreen({ navigation }) {
           </View>
         </ScrollView>
 
-        {/* FOOTER BUTTON (Fixed at bottom, pushes up with keyboard) */}
-        <View style={styles.footer}>
+        {/* 3. FOOTER BUTTON: Dynamic Padding applied here */}
+        <View
+          style={[
+            styles.footer,
+            { paddingBottom: 20 + insets.bottom }, // Lifts up based on device safe area
+          ]}
+        >
           <TouchableOpacity
             style={[styles.saveButton, loading && styles.disabledButton]}
             onPress={handleSave}
@@ -240,7 +250,7 @@ const styles = StyleSheet.create({
   // Footer
   footer: {
     paddingHorizontal: 24,
-    paddingBottom: 20,
+    // paddingBottom: 20, <--- REMOVED (Now dynamic in JSX)
     paddingTop: 10,
     backgroundColor: COLORS.background,
   },

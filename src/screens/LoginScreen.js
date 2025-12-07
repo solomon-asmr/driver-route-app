@@ -2,152 +2,193 @@ import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+// 1. IMPORT THE HOOK
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function LoginScreen({ navigation }) {
+  // 2. GET INSETS
+  const insets = useSafeAreaInsets();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleAuth(type) {
+  const handleLogin = async () => {
     setLoading(true);
-    const { error } =
-      type === "LOGIN"
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: password,
+    });
 
     if (error) {
-      alert(error.message);
+      Alert.alert("Login Failed", error.message);
       setLoading(false);
     } else {
-      setLoading(false);
-      if (type === "LOGIN") navigation.replace("Home");
-      else alert("Account created! Please Log In.");
+      // Success! Go to Home
+      navigation.replace("Home");
     }
-  }
+  };
+
+  const handleSignUp = async () => {
+    setLoading(true);
+    const { error } = await supabase.auth.signUp({
+      email: email,
+      password: password,
+    });
+
+    if (error) {
+      Alert.alert("Sign Up Failed", error.message);
+    } else {
+      Alert.alert(
+        "Success!",
+        "Please check your email to confirm your account."
+      );
+    }
+    setLoading(false);
+  };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      style={styles.container}
-    >
-      <View style={styles.content}>
-        {/* LOGO AREA */}
-        <View style={styles.logoContainer}>
-          {/* THE ROUNDED BOX (Same technique as Welcome Screen) */}
-          <View style={styles.roundedLogoBox}>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.keyboardView}
+      >
+        {/* 3. NEW HEADER WITH BACK BUTTON */}
+        <View style={[styles.header, { marginTop: 10 }]}>
+          <TouchableOpacity
+            onPress={() => navigation.replace("Welcome")}
+            style={styles.backBtn}
+          >
+            <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.contentContainer}>
+          {/* LOGO */}
+          <View style={styles.logoContainer}>
             <Image
               source={require("../../assets/logo.png")}
-              style={styles.fullImage}
+              style={styles.logo}
             />
+            <Text style={styles.title}>Welcome Back</Text>
+            <Text style={styles.subtitle}>Sign in to continue</Text>
           </View>
 
-          <Text style={styles.title}>
-            Navi<Text style={{ color: COLORS.primary }}>Go</Text>
-          </Text>
-          <Text style={styles.subtitle}>Route Optimization & Logistics</Text>
-        </View>
+          {/* FORM */}
+          <View style={styles.form}>
+            <View style={styles.inputWrapper}>
+              <Ionicons
+                name="mail-outline"
+                size={20}
+                color={COLORS.textSub}
+                style={{ marginRight: 10 }}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Email Address"
+                placeholderTextColor={COLORS.textSub}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
 
-        {/* INPUTS */}
-        <View style={styles.form}>
-          <View style={styles.inputWrapper}>
-            <Ionicons
-              name="mail-outline"
-              size={20}
-              color={COLORS.textSub}
-              style={styles.inputIcon}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Email Address"
-              placeholderTextColor={COLORS.textSub}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-            />
-          </View>
+            <View style={styles.inputWrapper}>
+              <Ionicons
+                name="lock-closed-outline"
+                size={20}
+                color={COLORS.textSub}
+                style={{ marginRight: 10 }}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Password"
+                placeholderTextColor={COLORS.textSub}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+              />
+            </View>
 
-          <View style={styles.inputWrapper}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={20}
-              color={COLORS.textSub}
-              style={styles.inputIcon}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="Password"
-              placeholderTextColor={COLORS.textSub}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-            />
-          </View>
-
-          {/* BUTTONS */}
-          {loading ? (
-            <ActivityIndicator
-              size="large"
-              color={COLORS.primary}
-              style={{ marginTop: 20 }}
-            />
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.loginButton}
-                onPress={() => handleAuth("LOGIN")}
-              >
+            <TouchableOpacity
+              style={[styles.loginBtn, loading && styles.disabledBtn]}
+              onPress={handleLogin}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="white" />
+              ) : (
                 <Text style={styles.loginText}>Log In</Text>
-              </TouchableOpacity>
+              )}
+            </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.signupButton}
-                onPress={() => handleAuth("SIGNUP")}
-              >
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>New here? </Text>
+              <TouchableOpacity onPress={handleSignUp}>
                 <Text style={styles.signupText}>Create Account</Text>
               </TouchableOpacity>
-            </>
-          )}
+            </View>
+          </View>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+
+        {/* Dynamic padding at bottom for consistency */}
+        <View style={{ height: 20 + insets.bottom }} />
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  content: { flex: 1, justifyContent: "center", padding: 24 },
+  safeArea: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+    paddingTop: Platform.OS === "android" ? 30 : 0,
+  },
+  keyboardView: { flex: 1, paddingHorizontal: 24 },
+
+  // Header Style
+  header: {
+    alignItems: "flex-start",
+    marginBottom: 20,
+  },
+  backBtn: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: COLORS.card,
+    ...SHADOWS.small,
+  },
+
+  contentContainer: {
+    flex: 1,
+    justifyContent: "center", // Centers the form vertically
+    paddingBottom: 50,
+  },
 
   logoContainer: { alignItems: "center", marginBottom: 40 },
-
-  // --- NEW STYLING FOR LOGO ---
-  roundedLogoBox: {
-    width: 120,
-    height: 120,
-    borderRadius: 30, // Smooth rounded corners
-    overflow: "hidden", // Cuts the image at the corners
-    backgroundColor: "white",
+  logo: {
+    width: 100,
+    height: 100,
+    resizeMode: "contain",
     marginBottom: 20,
-    ...SHADOWS.medium, // Adds the nice shadow
   },
-  fullImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover", // Fills the box perfectly
-  },
-  // ---------------------------
-
-  title: { fontSize: 32, fontWeight: "bold", color: COLORS.textMain },
+  title: { fontSize: 28, fontWeight: "bold", color: COLORS.textMain },
   subtitle: { fontSize: 16, color: COLORS.textSub, marginTop: 5 },
 
   form: { width: "100%" },
@@ -155,30 +196,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: COLORS.card,
-    borderRadius: 12,
-    marginBottom: 16,
+    borderRadius: 16,
+    height: 60,
     paddingHorizontal: 15,
+    marginBottom: 15,
     borderWidth: 1,
     borderColor: COLORS.border,
-    height: 55,
+    ...SHADOWS.small,
   },
-  inputIcon: { marginRight: 10 },
   input: { flex: 1, fontSize: 16, color: COLORS.textMain, height: "100%" },
 
-  loginButton: {
+  loginBtn: {
     backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    height: 55,
+    height: 60,
+    borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
     marginTop: 10,
     ...SHADOWS.medium,
   },
-  loginText: { color: COLORS.textLight, fontSize: 18, fontWeight: "bold" },
+  disabledBtn: { backgroundColor: "#9CA3AF" },
+  loginText: { color: "white", fontSize: 18, fontWeight: "bold" },
 
-  signupButton: {
-    marginTop: 15,
-    alignItems: "center",
+  footerRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 20,
   },
-  signupText: { color: COLORS.textSub, fontSize: 16 },
+  footerText: { color: COLORS.textSub, fontSize: 15 },
+  signupText: { color: COLORS.primary, fontSize: 15, fontWeight: "bold" },
 });

@@ -9,9 +9,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// 1. IMPORT THE HOOK
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function WelcomeScreen({ navigation }) {
+  // 2. GET THE INSETS
+  const insets = useSafeAreaInsets();
+
   const handleGetStarted = () => {
     // Both buttons go to Login, but 'Get Started' implies creating an account
     // Our LoginScreen handles both, so we just navigate there.
@@ -22,7 +27,13 @@ export default function WelcomeScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
-      <View style={styles.container}>
+      {/* 3. APPLY DYNAMIC PADDING TO CONTAINER */}
+      <View
+        style={[
+          styles.container,
+          { paddingBottom: 20 + insets.bottom }, // Lifts buttons up above the swipe bar
+        ]}
+      >
         {/* 1. HERO VISUAL & BRANDING */}
         <View style={styles.heroSection}>
           <View style={styles.logoBox}>
@@ -101,7 +112,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: "space-between",
-    paddingBottom: 40,
+    // paddingBottom: 40, <--- REMOVED (Handled dynamically in JSX)
   },
 
   // --- HERO SECTION ---

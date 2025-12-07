@@ -14,8 +14,10 @@ import {
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
+// Ensure your .env file is correct. If this is undefined, routing won't show.
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
 
 const DEFAULT_LOCATION = {
@@ -46,6 +48,9 @@ function deg2rad(deg) {
 }
 
 export default function MapScreen({ navigation, route }) {
+  // HOOK: Get safe area insets (top notch, bottom swipe bar)
+  const insets = useSafeAreaInsets();
+
   const { passengersToRoute, finalDestination } = route.params || {
     passengersToRoute: [],
     finalDestination: null,
@@ -152,6 +157,12 @@ export default function MapScreen({ navigation, route }) {
     ? mapWaypoints.pop()
     : routeOrigin;
 
+  // DYNAMIC PADDING CALCULATIONS
+  // This ensures the Google Logo and Recenter button are always ABOVE the dashboard footer.
+  // Base footer height is roughly 180px + safe area.
+  const mapBottomPadding = 220 + insets.bottom;
+  const recenterButtonBottom = 190 + insets.bottom;
+
   return (
     <View style={styles.container}>
       <StatusBar
@@ -168,7 +179,8 @@ export default function MapScreen({ navigation, route }) {
         showsUserLocation={false}
         showsCompass={false}
         showsMyLocationButton={false}
-        mapPadding={{ top: 20, right: 0, bottom: 180, left: 0 }}
+        // Critical: Pushes Google Logo up so it isn't hidden by the footer
+        mapPadding={{ top: 20, right: 0, bottom: mapBottomPadding, left: 0 }}
       >
         {/* DRIVER CAR */}
         <Marker coordinate={driverLocation} anchor={{ x: 0.5, y: 0.5 }}>
@@ -223,11 +235,12 @@ export default function MapScreen({ navigation, route }) {
               distance: result.distance,
               duration: result.duration,
             });
+            // Fit map to route, accounting for the footer height
             mapRef.current.fitToCoordinates(result.coordinates, {
               edgePadding: {
                 top: Platform.OS === "android" ? 120 : 80,
                 right: 50,
-                bottom: 200,
+                bottom: mapBottomPadding + 20, // Add buffer
                 left: 50,
               },
             });
@@ -244,12 +257,16 @@ export default function MapScreen({ navigation, route }) {
         </TouchableOpacity>
       </SafeAreaView>
 
-      <TouchableOpacity style={styles.recenterButton} onPress={recenterMap}>
+      {/* Recenter Button: Positioned dynamically above the footer */}
+      <TouchableOpacity
+        style={[styles.recenterButton, { bottom: recenterButtonBottom }]}
+        onPress={recenterMap}
+      >
         <Ionicons name="locate" size={28} color={COLORS.primary} />
       </TouchableOpacity>
 
-      {/* DRIVER DASHBOARD (Clean Trip Monitor) */}
-      <View style={styles.bottomSheet}>
+      {/* TRIP DASHBOARD: Dynamically adds padding for the swipe bar */}
+      <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 20 }]}>
         <Text style={styles.dashboardTitle}>TRIP DASHBOARD</Text>
 
         <View style={styles.tripInfo}>
@@ -355,14 +372,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     ...SHADOWS.medium,
   },
+
   recenterButton: {
     position: "absolute",
-    bottom: 180,
     right: 20,
     backgroundColor: "white",
     padding: 12,
     borderRadius: 25,
     ...SHADOWS.medium,
+    // Note: 'bottom' is handled inline in the component to adapt to SafeArea
   },
 
   bottomSheet: {
@@ -374,7 +392,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
-    paddingBottom: 40,
+    // Note: 'paddingBottom' is handled inline in the component
     ...SHADOWS.medium,
     elevation: 20,
   },

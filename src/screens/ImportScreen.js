@@ -13,15 +13,20 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// 1. IMPORT THE HOOK
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function ImportScreen({ navigation }) {
+  // 2. GET THE INSETS
+  const insets = useSafeAreaInsets();
+
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 1. Hide Default Header
+  // Hide Default Header
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
@@ -127,8 +132,13 @@ export default function ImportScreen({ navigation }) {
           </View>
         </View>
 
-        {/* ACTION BUTTON */}
-        <View style={styles.footer}>
+        {/* 3. DYNAMIC FOOTER MARGIN */}
+        <View
+          style={[
+            styles.footer,
+            { marginBottom: 20 + insets.bottom }, // Lifts up dynamically
+          ]}
+        >
           <TouchableOpacity
             style={[styles.button, loading && styles.disabledButton]}
             onPress={handleImport}
@@ -235,7 +245,10 @@ const styles = StyleSheet.create({
   },
 
   // Footer
-  footer: { marginTop: "auto", marginBottom: 30 },
+  footer: {
+    marginTop: "auto",
+    // marginBottom: 30, <--- REMOVED (Handled dynamically)
+  },
   button: {
     backgroundColor: COLORS.primary,
     height: 60,

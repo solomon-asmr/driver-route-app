@@ -14,18 +14,23 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+// 1. IMPORT SAFE AREA HOOK
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function HomeScreen({ navigation, route }) {
+  // 2. GET INSETS
+  const insets = useSafeAreaInsets();
+
   const [passengers, setPassengers] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [destinationAddress, setDestinationAddress] = useState("");
   const [processingRoute, setProcessingRoute] = useState(false);
 
-  // 1. HIDE DEFAULT HEADER
+  // HIDE DEFAULT HEADER
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
@@ -107,7 +112,6 @@ export default function HomeScreen({ navigation, route }) {
     else setSelectedIds([...selectedIds, id]);
   };
 
-  // --- NEW: Helper function to actually go to the map ---
   const proceedToMap = async (passengersToTake) => {
     setProcessingRoute(true);
 
@@ -128,9 +132,8 @@ export default function HomeScreen({ navigation, route }) {
           name: "Finish: " + destinationAddress,
         };
 
-        // Navigate to Map
         navigation.navigate("Map", {
-          passengersToRoute: passengersToTake, // This might be empty []
+          passengersToRoute: passengersToTake,
           finalDestination: destCoords,
         });
       } else {
@@ -142,45 +145,36 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  // --- UPDATED: Handle Button Click ---
   const handleOptimize = () => {
-    // 1. Must have a destination
     if (!destinationAddress.trim()) {
       return Alert.alert("Missing Info", "Please enter a final destination.");
     }
 
-    // 2. Determine Passengers
     const selectedPassengers = passengers.filter((p) =>
       selectedIds.includes(p.id)
     );
 
-    // 3. Logic Check: Are there passengers?
     if (selectedPassengers.length === 0) {
-      // CASE: No Passengers -> Ask Confirmation
       Alert.alert(
         "No Passengers Selected",
         "You haven't selected anyone. Do you want to drive directly to the destination?",
         [
           {
-            text: "Add Passenger", // "Cancel" logic
+            text: "Add Passenger",
             style: "cancel",
-            onPress: () => {
-              /* Do nothing, stay on screen */
-            },
+            onPress: () => {},
           },
           {
-            text: "Drive Solo", // "Continue" logic
-            onPress: () => proceedToMap([]), // Send empty array
+            text: "Drive Solo",
+            onPress: () => proceedToMap([]),
           },
         ]
       );
     } else {
-      // CASE: Normal -> Go immediately
       proceedToMap(selectedPassengers);
     }
   };
 
-  // --- RENDER CARD ---
   const renderPassenger = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
     return (
@@ -243,7 +237,8 @@ export default function HomeScreen({ navigation, route }) {
           <TouchableOpacity
             onPress={async () => {
               await supabase.auth.signOut();
-              navigation.replace("Login");
+              // --- UPDATED: Redirects to Welcome Screen now ---
+              navigation.replace("Welcome");
             }}
             style={styles.logoutBtn}
           >
@@ -298,7 +293,11 @@ export default function HomeScreen({ navigation, route }) {
             data={passengers}
             keyExtractor={(item) => item.id.toString()}
             renderItem={renderPassenger}
-            contentContainerStyle={styles.listContent}
+            // Add extra padding to list so last item isn't hidden by the floating footer
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingBottom: 150 + insets.bottom },
+            ]}
             onRefresh={fetchPassengers}
             refreshing={loading}
             showsVerticalScrollIndicator={false}
@@ -313,8 +312,13 @@ export default function HomeScreen({ navigation, route }) {
           />
         )}
 
-        {/* FOOTER */}
-        <View style={styles.footer}>
+        {/* 3. DYNAMIC FOOTER POSITIONING */}
+        <View
+          style={[
+            styles.footer,
+            { bottom: 20 + insets.bottom }, // Lifts up dynamically
+          ]}
+        >
           <View style={styles.footerSectionLeft}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <Ionicons
@@ -425,7 +429,9 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
 
-  listContent: { paddingBottom: 130 },
+  // Note: Padding bottom is now handled dynamically in JSX
+  listContent: { flexGrow: 1 },
+
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
@@ -456,7 +462,7 @@ const styles = StyleSheet.create({
 
   footer: {
     position: "absolute",
-    bottom: 30,
+    // bottom: 30,  <-- REMOVED (Handled dynamically)
     left: 20,
     right: 20,
     backgroundColor: COLORS.card,
