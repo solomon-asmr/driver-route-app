@@ -19,7 +19,7 @@ export default {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/adaptive-icon.png",
+        foregroundImage: "./assets/logo.png",
         backgroundColor: "#ffffff",
       },
       package: "com.solomon.navigo",
@@ -30,7 +30,7 @@ export default {
       },
     },
     web: {
-      favicon: "./assets/favicon.png",
+      favicon: "./assets/logo.png",
     },
     plugins: [
       [
