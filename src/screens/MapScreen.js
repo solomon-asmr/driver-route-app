@@ -14,10 +14,10 @@ import {
 } from "react-native";
 import MapView, { Marker, PROVIDER_GOOGLE } from "react-native-maps";
 import MapViewDirections from "react-native-maps-directions";
+// 1. IMPORT SAFE AREA HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
-// Ensure your .env file is correct. If this is undefined, routing won't show.
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
 
 const DEFAULT_LOCATION = {
@@ -29,7 +29,7 @@ const DEFAULT_LOCATION = {
 
 // HELPER: Haversine Formula for accurate distance (km)
 function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-  var R = 6371;
+  var R = 6371; // Radius of the earth in km
   var dLat = deg2rad(lat2 - lat1);
   var dLon = deg2rad(lon2 - lon1);
   var a =
@@ -39,7 +39,7 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  var d = R * c;
+  var d = R * c; // Distance in km
   return d;
 }
 
@@ -48,7 +48,7 @@ function deg2rad(deg) {
 }
 
 export default function MapScreen({ navigation, route }) {
-  // HOOK: Get safe area insets (top notch, bottom swipe bar)
+  // 2. GET INSETS
   const insets = useSafeAreaInsets();
 
   const { passengersToRoute, finalDestination } = route.params || {
@@ -59,10 +59,27 @@ export default function MapScreen({ navigation, route }) {
   const [driverLocation, setDriverLocation] = useState(null);
   const [routeOrigin, setRouteOrigin] = useState(null);
   const [optimizedOrder, setOptimizedOrder] = useState([]);
+
+  // Stats now update dynamically
   const [routeStats, setRouteStats] = useState({ distance: 0, duration: 0 });
   const [visitedIds, setVisitedIds] = useState(new Set());
 
+  // Ref to prevent multiple "Congrats" alerts
+  const hasArrivedRef = useRef(false);
   const mapRef = useRef(null);
+
+  // Determine the final coordinates early so the GPS loop can use them
+  // Logic: Use finalDestination OR the last passenger in the list
+  const targetLat =
+    finalDestination?.lat ||
+    (passengersToRoute.length > 0
+      ? passengersToRoute[passengersToRoute.length - 1].lat
+      : 0);
+  const targetLng =
+    finalDestination?.lng ||
+    (passengersToRoute.length > 0
+      ? passengersToRoute[passengersToRoute.length - 1].lng
+      : 0);
 
   useEffect(() => {
     let locationSubscription = null;
@@ -86,13 +103,14 @@ export default function MapScreen({ navigation, route }) {
       setDriverLocation(initialPos);
       setRouteOrigin(initialPos);
 
-      // Live Tracking
+      // --- LIVE TRACKING LOOP ---
       locationSubscription = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, distanceInterval: 10 },
         (newLoc) => {
           const lat = newLoc.coords.latitude;
           const lng = newLoc.coords.longitude;
 
+          // 1. Update Driver Marker
           setDriverLocation({
             latitude: lat,
             longitude: lng,
@@ -100,7 +118,40 @@ export default function MapScreen({ navigation, route }) {
             longitudeDelta: 0.05,
           });
 
-          // Geofencing Check (50 meters)
+          // 2. DYNAMIC DASHBOARD UPDATES
+          // Calculate distance remaining to the Final Destination
+          if (targetLat && targetLng) {
+            const distRemaining = getDistanceFromLatLonInKm(
+              lat,
+              lng,
+              targetLat,
+              targetLng
+            );
+
+            // Check for ARRIVAL (Threshold: 100 meters / 0.1 km)
+            if (distRemaining < 0.1 && !hasArrivedRef.current) {
+              hasArrivedRef.current = true; // Lock it so it doesn't alert twice
+              Alert.alert(
+                "🎉 Destination Reached! 🎉",
+                "Congratulations! You have arrived at your destination. Great drive! 🚗💨",
+                [
+                  {
+                    text: "Awesome",
+                    onPress: () => console.log("Trip Completed"),
+                  },
+                ]
+              );
+            }
+
+            // Update the Dashboard State
+            setRouteStats({
+              distance: distRemaining,
+              // Estimate: Avg city speed 30km/h. Time = (Dist / Speed) * 60 mins
+              duration: (distRemaining / 30) * 60,
+            });
+          }
+
+          // 3. Geofencing Check for Passengers (50 meters)
           passengersToRoute.forEach((p) => {
             const distanceKm = getDistanceFromLatLonInKm(
               lat,
@@ -158,8 +209,6 @@ export default function MapScreen({ navigation, route }) {
     : routeOrigin;
 
   // DYNAMIC PADDING CALCULATIONS
-  // This ensures the Google Logo and Recenter button are always ABOVE the dashboard footer.
-  // Base footer height is roughly 180px + safe area.
   const mapBottomPadding = 220 + insets.bottom;
   const recenterButtonBottom = 190 + insets.bottom;
 
@@ -179,7 +228,6 @@ export default function MapScreen({ navigation, route }) {
         showsUserLocation={false}
         showsCompass={false}
         showsMyLocationButton={false}
-        // Critical: Pushes Google Logo up so it isn't hidden by the footer
         mapPadding={{ top: 20, right: 0, bottom: mapBottomPadding, left: 0 }}
       >
         {/* DRIVER CAR */}
@@ -187,7 +235,7 @@ export default function MapScreen({ navigation, route }) {
           <Ionicons name="car-sport" size={40} color={COLORS.secondary} />
         </Marker>
 
-        {/* PASSENGERS (Dynamic Color Logic) */}
+        {/* PASSENGERS */}
         {passengersToRoute.map((p, index) => {
           const isVisited = visitedIds.has(p.id);
           return (
@@ -230,17 +278,20 @@ export default function MapScreen({ navigation, route }) {
           strokeColor={COLORS.primary}
           optimizeWaypoints={true}
           onReady={(result) => {
-            setOptimizedOrder(result.waypointOrder);
-            setRouteStats({
-              distance: result.distance,
-              duration: result.duration,
-            });
-            // Fit map to route, accounting for the footer height
+            // Only set stats initially to avoid overriding the live GPS updates immediately
+            if (routeStats.distance === 0) {
+              setOptimizedOrder(result.waypointOrder);
+              setRouteStats({
+                distance: result.distance,
+                duration: result.duration,
+              });
+            }
+
             mapRef.current.fitToCoordinates(result.coordinates, {
               edgePadding: {
                 top: Platform.OS === "android" ? 120 : 80,
                 right: 50,
-                bottom: mapBottomPadding + 20, // Add buffer
+                bottom: mapBottomPadding + 20,
                 left: 50,
               },
             });
@@ -257,7 +308,6 @@ export default function MapScreen({ navigation, route }) {
         </TouchableOpacity>
       </SafeAreaView>
 
-      {/* Recenter Button: Positioned dynamically above the footer */}
       <TouchableOpacity
         style={[styles.recenterButton, { bottom: recenterButtonBottom }]}
         onPress={recenterMap}
@@ -265,7 +315,7 @@ export default function MapScreen({ navigation, route }) {
         <Ionicons name="locate" size={28} color={COLORS.primary} />
       </TouchableOpacity>
 
-      {/* TRIP DASHBOARD: Dynamically adds padding for the swipe bar */}
+      {/* TRIP DASHBOARD: DYNAMIC UPDATE */}
       <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 20 }]}>
         <Text style={styles.dashboardTitle}>TRIP DASHBOARD</Text>
 
@@ -277,10 +327,12 @@ export default function MapScreen({ navigation, route }) {
               color={COLORS.textSub}
               style={{ marginBottom: 5 }}
             />
+            {/* Display Distance Remaining */}
             <Text style={styles.tripValue}>
-              {routeStats.distance.toFixed(1)} km
+              {routeStats.distance > 0 ? routeStats.distance.toFixed(1) : "0.0"}{" "}
+              km
             </Text>
-            <Text style={styles.tripLabel}>DISTANCE</Text>
+            <Text style={styles.tripLabel}>REMAINING</Text>
           </View>
 
           <View style={styles.divider} />
@@ -292,8 +344,10 @@ export default function MapScreen({ navigation, route }) {
               color={COLORS.textSub}
               style={{ marginBottom: 5 }}
             />
+            {/* Display Time Remaining (Dynamic) */}
             <Text style={styles.tripValue}>
-              {Math.round(routeStats.duration)} min
+              {routeStats.duration > 0 ? Math.ceil(routeStats.duration) : "0"}{" "}
+              min
             </Text>
             <Text style={styles.tripLabel}>EST. TIME</Text>
           </View>
@@ -380,7 +434,6 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 25,
     ...SHADOWS.medium,
-    // Note: 'bottom' is handled inline in the component to adapt to SafeArea
   },
 
   bottomSheet: {
@@ -392,7 +445,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
-    // Note: 'paddingBottom' is handled inline in the component
     ...SHADOWS.medium,
     elevation: 20,
   },
