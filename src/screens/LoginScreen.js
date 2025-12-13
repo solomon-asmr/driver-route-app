@@ -17,9 +17,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
+// 2. IMPORT ASYNC STORAGE (For Session persistence)
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function LoginScreen({ navigation }) {
-  // 2. GET INSETS
+  // 3. GET INSETS
   const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState("");
@@ -37,13 +39,23 @@ export default function LoginScreen({ navigation }) {
       Alert.alert("Login Failed", error.message);
       setLoading(false);
     } else {
+      // 4. SAVE SESSION DATA BEFORE NAVIGATING
+      try {
+        await AsyncStorage.setItem("isLoggedIn", "true");
+        await AsyncStorage.setItem(
+          "lastActiveTimestamp",
+          Date.now().toString()
+        );
+      } catch (e) {
+        console.error("Failed to save session", e);
+      }
+
       // Success! Go to Home
       navigation.replace("Home");
     }
   };
 
   return (
-    // 3. SAFE AREA VIEW REPLACEMENT
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
@@ -62,7 +74,7 @@ export default function LoginScreen({ navigation }) {
         </View>
 
         <View style={styles.contentContainer}>
-          {/* LOGO - Now styled exactly like Welcome Screen (Rounded Box) */}
+          {/* LOGO */}
           <View style={styles.logoContainer}>
             <View style={styles.logoBox}>
               <Image
@@ -125,7 +137,6 @@ export default function LoginScreen({ navigation }) {
 
             <View style={styles.footerRow}>
               <Text style={styles.footerText}>New here? </Text>
-              {/* FIXED: Now navigates to the Create Account Page */}
               <TouchableOpacity onPress={() => navigation.navigate("Signup")}>
                 <Text style={styles.signupText}>Create Account</Text>
               </TouchableOpacity>
@@ -144,7 +155,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
-    // paddingTop handled in JSX
   },
   keyboardView: { flex: 1, paddingHorizontal: 24 },
 
@@ -167,15 +177,14 @@ const styles = StyleSheet.create({
 
   logoContainer: { alignItems: "center", marginBottom: 40 },
 
-  // NEW: Styled Logo Box (Matches Welcome Screen Style)
   logoBox: {
     width: 100,
     height: 100,
-    borderRadius: 25, // Makes it a "Squircle"
-    overflow: "hidden", // Cuts off the sharp corners of the image
+    borderRadius: 25,
+    overflow: "hidden",
     backgroundColor: "white",
     marginBottom: 20,
-    ...SHADOWS.medium, // Adds the nice drop shadow
+    ...SHADOWS.medium,
   },
   logoImage: {
     width: "100%",

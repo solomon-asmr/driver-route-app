@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   FlatList,
   Platform,
   SafeAreaView,
@@ -14,14 +15,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT SAFE AREA HOOK
+// 2. IMPORT ASYNC STORAGE
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function HomeScreen({ navigation, route }) {
-  // 2. GET INSETS
   const insets = useSafeAreaInsets();
 
   const [passengers, setPassengers] = useState([]);
@@ -34,6 +35,22 @@ export default function HomeScreen({ navigation, route }) {
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
+
+  // --- 3. BLOCK HARDWARE BACK BUTTON (Android) ---
+  useEffect(() => {
+    const backAction = () => {
+      // Minimizes the app instead of going back to Login
+      BackHandler.exitApp();
+      return true; // Prevents default behavior
+    };
+
+    const backHandler = BackHandler.addEventListener(
+      "hardwareBackPress",
+      backAction
+    );
+
+    return () => backHandler.remove();
+  }, []);
 
   // --- LOGIC SECTION ---
   useEffect(() => {
@@ -132,7 +149,7 @@ export default function HomeScreen({ navigation, route }) {
           name: "Finish: " + destinationAddress,
         };
 
-        navigation.navigate("Map", {
+        navigation.navigate("MapScreen", {
           passengersToRoute: passengersToTake,
           finalDestination: destCoords,
         });
@@ -234,10 +251,15 @@ export default function HomeScreen({ navigation, route }) {
         {/* HEADER */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>My Route</Text>
+
+          {/* 4. UPDATED LOGOUT BUTTON: Clears Session Data */}
           <TouchableOpacity
             onPress={async () => {
               await supabase.auth.signOut();
-              // --- UPDATED: Redirects to Welcome Screen now ---
+              await AsyncStorage.multiRemove([
+                "isLoggedIn",
+                "lastActiveTimestamp",
+              ]);
               navigation.replace("Welcome");
             }}
             style={styles.logoutBtn}
@@ -293,7 +315,6 @@ export default function HomeScreen({ navigation, route }) {
             data={passengers}
             keyExtractor={(item) => item.id.toString()}
             renderItem={renderPassenger}
-            // Add extra padding to list so last item isn't hidden by the floating footer
             contentContainerStyle={[
               styles.listContent,
               { paddingBottom: 150 + insets.bottom },
@@ -312,13 +333,8 @@ export default function HomeScreen({ navigation, route }) {
           />
         )}
 
-        {/* 3. DYNAMIC FOOTER POSITIONING */}
-        <View
-          style={[
-            styles.footer,
-            { bottom: 20 + insets.bottom }, // Lifts up dynamically
-          ]}
-        >
+        {/* FOOTER */}
+        <View style={[styles.footer, { bottom: 20 + insets.bottom }]}>
           <View style={styles.footerSectionLeft}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
               <Ionicons
@@ -429,7 +445,6 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
 
-  // Note: Padding bottom is now handled dynamically in JSX
   listContent: { flexGrow: 1 },
 
   card: {
@@ -462,7 +477,6 @@ const styles = StyleSheet.create({
 
   footer: {
     position: "absolute",
-    // bottom: 30,  <-- REMOVED (Handled dynamically)
     left: 20,
     right: 20,
     backgroundColor: COLORS.card,
