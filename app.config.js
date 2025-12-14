@@ -2,7 +2,7 @@ import "dotenv/config";
 
 export default {
   expo: {
-    name: "NaviGo",
+    name: "NaviGo Driver",
     slug: "navigo",
     version: "1.0.0",
     orientation: "portrait",
@@ -18,11 +18,25 @@ export default {
       bundleIdentifier: "com.solomon.navigo",
     },
     android: {
+      // 1. UNIQUE PACKAGE NAME (Make sure this is unique!)
+      package: "com.solomon.navigo",
+
+      // 2. VERSION CODE (CRITICAL: Must be an integer. Increment this for every update: 1, 2, 3...)
+      versionCode: 1,
+
       adaptiveIcon: {
         foregroundImage: "./assets/adaptive-icon.png",
         backgroundColor: "#ffffff",
       },
-      package: "com.solomon.navigo",
+
+      // 3. EXPLICIT PERMISSIONS (Helps with Google Play Verification)
+      permissions: [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+      ],
+
       config: {
         googleMaps: {
           apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY,
@@ -37,7 +51,9 @@ export default {
         "expo-location",
         {
           locationAlwaysAndWhenInUsePermission:
-            "Allow NaviGo to use your location.",
+            "NaviGo needs your location to track trips and mark stops automatically.",
+          // 4. ENSURE BACKGROUND LOCATION IS ENABLED IN PLUGIN
+          isAndroidBackgroundLocationEnabled: true,
         },
       ],
     ],

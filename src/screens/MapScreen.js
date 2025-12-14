@@ -13,12 +13,19 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
-// --- CONFIG ---
+// --- CONFIGURATION ---
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
 const REROUTE_THRESHOLD_METERS = 50;
-const ARRIVAL_THRESHOLD_KM = 0.05;
+const ARRIVAL_THRESHOLD_KM = 0.05; // 50 meters
 
-// --- HELPER MATH ---
+// --- HELPER: STRIP HTML TAGS ---
+// Google sends instructions like "Turn <b>Left</b>". We need just "Turn Left".
+const stripHtml = (html) => {
+  if (!html) return "";
+  return html.replace(/<[^>]*>?/gm, "");
+};
+
+// --- HELPER MATH FUNCTIONS ---
 const decodePolyline = (t, e) => {
   let n,
     o,
@@ -198,7 +205,7 @@ const StopMarker = memo(({ p, isVisited }) => {
 });
 
 export default function MapScreen({ navigation, route }) {
-  const insets = useSafeAreaInsets(); // GET INSETS HERE
+  const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
 
   const { passengersToRoute, finalDestination } = route.params || {
@@ -206,6 +213,7 @@ export default function MapScreen({ navigation, route }) {
     finalDestination: null,
   };
 
+  // --- STATE ---
   const [driverLocation, setDriverLocation] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
   const [remainingDistKm, setRemainingDistKm] = useState(0);
@@ -213,12 +221,18 @@ export default function MapScreen({ navigation, route }) {
   const [isRerouting, setIsRerouting] = useState(false);
   const [visitedIds, setVisitedIds] = useState(new Set());
 
-  // Refs
+  // NEW: Navigation State
+  const [nextManeuver, setNextManeuver] = useState(null); // e.g. "Turn Left"
+  const [distToManeuver, setDistToManeuver] = useState(0); // e.g. "200" (meters)
+
+  // --- REFS ---
   const visitedIdsRef = useRef(new Set());
   const currentRouteCoords = useRef([]);
+  const routeSteps = useRef([]); // Stores the turn-by-turn steps
   const hasArrivedRef = useRef(false);
   const averageSpeedKmPerMin = useRef(0.5);
 
+  // 1. INITIAL LOAD
   useEffect(() => {
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -232,13 +246,17 @@ export default function MapScreen({ navigation, route }) {
         longitude: loc.coords.longitude,
       };
       setDriverLocation(startPos);
-      fetchRoute(startPos, passengersToRoute);
+      // Fetch initial route AND zoom out to show it
+      fetchRoute(startPos, passengersToRoute, true);
     })();
   }, []);
 
-  const fetchRoute = async (startLoc, waypoints) => {
+  // 2. FETCH ROUTE LOGIC
+  const fetchRoute = async (startLoc, waypoints, moveCamera = false) => {
     if (isRerouting) return;
     setIsRerouting(true);
+    setNextManeuver(null); // Clear old instructions while rerouting
+
     try {
       const activeWaypoints = waypoints.filter(
         (p) => !visitedIdsRef.current.has(p.id)
@@ -266,10 +284,20 @@ export default function MapScreen({ navigation, route }) {
 
       if (data.status === "OK") {
         const routeData = data.routes[0];
+
+        // A. Visual Route Line
         const points = decodePolyline(routeData.overview_polyline.points);
         setRouteCoords(points);
         currentRouteCoords.current = points;
 
+        // B. Turn-by-Turn Steps (Flatten all legs into one list)
+        let allSteps = [];
+        routeData.legs.forEach((leg) => {
+          allSteps = [...allSteps, ...leg.steps];
+        });
+        routeSteps.current = allSteps;
+
+        // C. Calculate Trip Totals
         let totalDistMeters = 0;
         let totalDurationSecs = 0;
         routeData.legs.forEach((leg) => {
@@ -284,8 +312,8 @@ export default function MapScreen({ navigation, route }) {
         setRemainingDistKm(totalDistMeters / 1000);
         setRemainingTimeMins(totalDurationSecs / 60);
 
-        if (mapRef.current) {
-          // Padding here affects the "Fit To Coordinates" logic
+        // D. Initial Camera Move (Only if requested)
+        if (moveCamera && mapRef.current) {
           mapRef.current.fitToCoordinates(points, {
             edgePadding: { top: 100, right: 50, bottom: 250, left: 50 },
             animated: true,
@@ -299,6 +327,7 @@ export default function MapScreen({ navigation, route }) {
     }
   };
 
+  // 3. LIVE NAVIGATION LOOP
   useEffect(() => {
     let sub = null;
     const startWatching = async () => {
@@ -309,8 +338,74 @@ export default function MapScreen({ navigation, route }) {
             latitude: loc.coords.latitude,
             longitude: loc.coords.longitude,
           };
+          const { heading, speed } = loc.coords;
+
           setDriverLocation(userPos);
 
+          // A. Waze-Style Camera Logic
+          // Only animate if speed > 0.5 m/s (~2 km/h) to prevent spinning when stopped
+          if (mapRef.current && heading >= 0 && speed > 0.5) {
+            mapRef.current.animateCamera(
+              {
+                center: userPos,
+                heading: heading, // Rotate map to match car
+                pitch: 50, // 3D Tilt
+                zoom: 18, // Zoom Level
+              },
+              { duration: 1000 }
+            );
+          }
+
+          // B. "Next Turn" Logic
+          if (routeSteps.current.length > 0) {
+            // Find the closest Step End Point to know where we are
+            let activeStepIndex = -1;
+            let minDist = Number.MAX_VALUE;
+
+            for (let i = 0; i < routeSteps.current.length; i++) {
+              const stepEnd = routeSteps.current[i].end_location;
+              const d = getDistanceFromLatLonInKm(
+                userPos.latitude,
+                userPos.longitude,
+                stepEnd.lat,
+                stepEnd.lng
+              );
+              // We assume we are on the step that ends closest to us
+              if (d < minDist) {
+                minDist = d;
+                activeStepIndex = i;
+              }
+            }
+
+            // If we found our current segment, show info for the NEXT one
+            if (activeStepIndex !== -1) {
+              // Distance to the end of CURRENT segment (The Turn)
+              const currentStepEnd =
+                routeSteps.current[activeStepIndex].end_location;
+              const distToTurnKm = getDistanceFromLatLonInKm(
+                userPos.latitude,
+                userPos.longitude,
+                currentStepEnd.lat,
+                currentStepEnd.lng
+              );
+
+              setDistToManeuver((distToTurnKm * 1000).toFixed(0)); // Convert to meters
+
+              // If there is a next step, show its instruction (e.g., "Turn Left")
+              if (activeStepIndex + 1 < routeSteps.current.length) {
+                setNextManeuver(
+                  stripHtml(
+                    routeSteps.current[activeStepIndex + 1].html_instructions
+                  )
+                );
+              } else {
+                // No next step? We are finishing the last leg.
+                setNextManeuver("Arriving at Destination");
+              }
+            }
+          }
+
+          // C. Update Dashboard Stats (Distance/Time)
           if (currentRouteCoords.current.length > 0) {
             const distLeft = calculateRemainingPolylineDist(
               userPos,
@@ -322,6 +417,7 @@ export default function MapScreen({ navigation, route }) {
             }
           }
 
+          // D. Check Passenger Stops
           passengersToRoute.forEach((p) => {
             if (!visitedIdsRef.current.has(p.id)) {
               const dist = getDistanceFromLatLonInKm(
@@ -333,11 +429,13 @@ export default function MapScreen({ navigation, route }) {
               if (dist < 0.05) {
                 visitedIdsRef.current.add(p.id);
                 setVisitedIds(new Set(visitedIdsRef.current));
-                fetchRoute(userPos, passengersToRoute);
+                // Silent Re-route (moveCamera = false)
+                fetchRoute(userPos, passengersToRoute, false);
               }
             }
           });
 
+          // E. Check Final Destination
           if (finalDestination && !hasArrivedRef.current) {
             const distToFinal = getDistanceFromLatLonInKm(
               userPos.latitude,
@@ -353,6 +451,7 @@ export default function MapScreen({ navigation, route }) {
             }
           }
 
+          // F. Off-Route Check
           if (currentRouteCoords.current.length > 0) {
             const isOff = isUserOffRoute(
               userPos,
@@ -360,7 +459,8 @@ export default function MapScreen({ navigation, route }) {
               REROUTE_THRESHOLD_METERS
             );
             if (isOff && !isRerouting) {
-              fetchRoute(userPos, passengersToRoute);
+              // Silent Re-route (moveCamera = false)
+              fetchRoute(userPos, passengersToRoute, false);
             }
           }
         }
@@ -372,31 +472,26 @@ export default function MapScreen({ navigation, route }) {
     };
   }, []);
 
-  // --- LAYOUT CALCULATIONS ---
-  // 1. Calculate the Header Height
-  // We want it to be: Notch Height + 60px for the button
+  // --- UI SIZING ---
   const headerHeight = insets.top + 60;
 
-  // 2. Padding for the Map Controls (Compass)
-  // We set the 'top' padding to be exactly the header height.
-  // This pushes the compass down so it sits right underneath the white header bar.
+  // Extra top padding ensures Compass & Google Logo don't hide behind the green banner
   const mapPadding = {
-    top: headerHeight + 10, // Compass will sit 10px below header
+    top: headerHeight + 120,
     right: 10,
-    bottom: 240, // Keeps Google Logo above the dashboard
+    bottom: 240,
     left: 10,
   };
 
   return (
     <View style={styles.container}>
-      {/* 1. STATUS BAR: Solid white background */}
       <StatusBar
         barStyle="dark-content"
         backgroundColor="white"
         translucent={false}
       />
 
-      {/* 2. THE HEADER (Fixed Position) */}
+      {/* 1. HEADER */}
       <View
         style={[
           styles.headerContainer,
@@ -412,9 +507,24 @@ export default function MapScreen({ navigation, route }) {
         <Text style={styles.headerTitle}>Active Route</Text>
       </View>
 
-      {/* 3. THE MAP (Fills screen behind/below header) */}
-      {/* Note: We use marginTop to physically move the map down if we want, OR use padding. 
-          Here, we let the map fill the screen but use Padding to move the compass. */}
+      {/* 2. NAVIGATION BANNER (Green Box) */}
+      {nextManeuver && (
+        <View style={[styles.navBanner, { top: headerHeight }]}>
+          <View style={styles.navIconBox}>
+            <Ionicons name="return-up-forward" size={32} color="white" />
+          </View>
+          <View style={styles.navTextBox}>
+            <Text style={styles.navDistText}>
+              {distToManeuver > 20 ? `In ${distToManeuver}m` : "Turn Now"}
+            </Text>
+            <Text style={styles.navInstructionText} numberOfLines={2}>
+              {nextManeuver}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* 3. MAP VIEW */}
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -426,7 +536,6 @@ export default function MapScreen({ navigation, route }) {
             ? { ...driverLocation, latitudeDelta: 0.05, longitudeDelta: 0.05 }
             : null
         }
-        // THIS IS THE CRITICAL FIX FOR COMPASS
         mapPadding={mapPadding}
       >
         {routeCoords.length > 0 && (
@@ -451,7 +560,7 @@ export default function MapScreen({ navigation, route }) {
         )}
       </MapView>
 
-      {/* 4. DASHBOARD */}
+      {/* 4. BOTTOM DASHBOARD */}
       <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 20 }]}>
         <View style={styles.tripInfo}>
           <View style={styles.statItem}>
@@ -479,19 +588,18 @@ export default function MapScreen({ navigation, route }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
 
-  // HEADER STYLES
   headerContainer: {
-    position: "absolute", // Locks it to the top
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: "white", // Solid background
+    backgroundColor: "white",
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
-    zIndex: 999, // Ensures it sits ON TOP of the map
+    zIndex: 999,
     ...SHADOWS.small,
   },
   headerTitle: {
@@ -509,10 +617,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#f5f5f5",
   },
 
-  // MAP
+  // NEW STYLES: NAVIGATION BANNER
+  navBanner: {
+    position: "absolute",
+    left: 10,
+    right: 10,
+    backgroundColor: "#1b5e20", // Dark Green
+    borderRadius: 10,
+    flexDirection: "row",
+    padding: 15,
+    zIndex: 998,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+    alignItems: "center",
+  },
+  navIconBox: { marginRight: 15 },
+  navTextBox: { flex: 1 },
+  navDistText: {
+    color: "#a5d6a7",
+    fontSize: 14,
+    fontWeight: "bold",
+    marginBottom: 2,
+  },
+  navInstructionText: { color: "white", fontSize: 18, fontWeight: "bold" },
+
   map: { width: "100%", height: "100%" },
 
-  // MARKERS
   stopMarker: {
     width: 26,
     height: 26,
@@ -546,7 +679,6 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
 
-  // DASHBOARD
   bottomSheet: {
     position: "absolute",
     bottom: 0,
