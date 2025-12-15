@@ -1,8 +1,10 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useLayoutEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  I18nManager,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -13,27 +15,35 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT THE HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function ImportScreen({ navigation }) {
-  // 2. GET THE INSETS
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation();
+
+  // CHECK: Is the active language Hebrew OR Arabic?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
 
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Hide Default Header
+  // Helper for RTL alignment (Updates instantly)
+  // FIX: Changed 'isHebrew' (undefined) to 'isRTL'
+  const textAlignStyle = { textAlign: isRTL ? "right" : "left" };
+
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
   const handleImport = async () => {
     if (!code.trim()) {
-      Alert.alert("Missing Code", "Please enter the route code.");
+      // FIX: Localized Alert & Button
+      Alert.alert(t("missing_code_title"), t("missing_code_msg"), [
+        { text: t("ok") },
+      ]);
       return;
     }
 
@@ -44,7 +54,10 @@ export default function ImportScreen({ navigation }) {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert("Error", "You are not logged in");
+        // FIX: Localized Alert & Button
+        Alert.alert(t("error_title"), t("logged_in_error"), [
+          { text: t("ok") },
+        ]);
         setLoading(false);
         return;
       }
@@ -58,17 +71,29 @@ export default function ImportScreen({ navigation }) {
       const data = await response.json();
 
       if (response.ok) {
-        Alert.alert("Success", "Route Imported Successfully!");
-        navigation.navigate("Home", {
-          importedDestination: data.destination,
-          importedIds: data.passengerIds,
-        });
+        // FIX: Localized Button + Wait for press to navigate (Better UX)
+        Alert.alert(t("import_success_title"), t("import_success_msg"), [
+          {
+            text: t("ok"),
+            onPress: () =>
+              navigation.navigate("Home", {
+                importedDestination: data.destination,
+                importedIds: data.passengerIds,
+              }),
+          },
+        ]);
       } else {
-        Alert.alert("Import Failed", data.error || "Invalid Code");
+        // FIX: Localized Alert & Button
+        Alert.alert(t("import_failed_title"), data.error || "Invalid Code", [
+          { text: t("ok") },
+        ]);
       }
     } catch (error) {
       console.error(error);
-      Alert.alert("Connection Error", "Could not reach server.");
+      // FIX: Localized Alert & Button
+      Alert.alert(t("connection_error_title"), t("connection_error_msg"), [
+        { text: t("ok") },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -88,9 +113,17 @@ export default function ImportScreen({ navigation }) {
             onPress={() => navigation.goBack()}
             style={styles.backBtn}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={COLORS.textMain}
+              // FIX: Force flip using isRTL logic
+              style={{
+                transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
+              }}
+            />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Import Route</Text>
+          <Text style={styles.headerTitle}>{t("import_title")}</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -103,24 +136,24 @@ export default function ImportScreen({ navigation }) {
               color={COLORS.primary}
             />
           </View>
-          <Text style={styles.heroTitle}>Load Shared Route</Text>
-          <Text style={styles.heroSubtitle}>
-            Enter the transfer code to download passengers
-          </Text>
+          <Text style={styles.heroTitle}>{t("load_shared_route")}</Text>
+          <Text style={styles.heroSubtitle}>{t("load_shared_subtitle")}</Text>
         </View>
 
         {/* INPUT AREA */}
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>TRANSFER CODE</Text>
+          <Text style={[styles.label, textAlignStyle]}>
+            {t("transfer_code_label")}
+          </Text>
           <View style={styles.inputWrapper}>
             <MaterialCommunityIcons
               name="ticket-confirmation-outline"
               size={24}
               color={COLORS.textSub}
-              style={{ marginRight: 10 }}
+              style={{ marginEnd: 10 }} // RTL Safe
             />
             <TextInput
-              style={styles.input}
+              style={[styles.input, textAlignStyle]}
               placeholder="TR-XXXX"
               placeholderTextColor="#9CA3AF"
               value={code}
@@ -132,13 +165,8 @@ export default function ImportScreen({ navigation }) {
           </View>
         </View>
 
-        {/* 3. DYNAMIC FOOTER MARGIN */}
-        <View
-          style={[
-            styles.footer,
-            { marginBottom: 20 + insets.bottom }, // Lifts up dynamically
-          ]}
-        >
+        {/* DYNAMIC FOOTER MARGIN */}
+        <View style={[styles.footer, { marginBottom: 20 + insets.bottom }]}>
           <TouchableOpacity
             style={[styles.button, loading && styles.disabledButton]}
             onPress={handleImport}
@@ -148,12 +176,12 @@ export default function ImportScreen({ navigation }) {
               <ActivityIndicator color="white" />
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text style={styles.buttonText}>Download Route</Text>
+                <Text style={styles.buttonText}>{t("download_route_btn")}</Text>
                 <Ionicons
                   name="download"
                   size={20}
                   color="white"
-                  style={{ marginLeft: 10 }}
+                  style={{ marginStart: 10 }} // RTL Safe
                 />
               </View>
             )}
@@ -247,7 +275,6 @@ const styles = StyleSheet.create({
   // Footer
   footer: {
     marginTop: "auto",
-    // marginBottom: 30, <--- REMOVED (Handled dynamically)
   },
   button: {
     backgroundColor: COLORS.primary,

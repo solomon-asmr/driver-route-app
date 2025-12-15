@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  I18nManager,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
@@ -12,22 +14,30 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT THE HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function SignupScreen({ navigation }) {
-  // 2. GET INSETS
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation(); // <--- Get i18n instance
+
+  // CHECK: Is the active language Hebrew OR Arabic?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Helper for RTL Text Alignment (Updates instantly)
+  const textAlignStyle = { textAlign: isRTL ? "right" : "left" };
+
   const handleSignUp = async () => {
     if (!email || !password) {
-      Alert.alert("Missing Info", "Please enter both email and password.");
+      // FIX: Localized OK button
+      Alert.alert(t("missing_info"), t("enter_email_password"), [
+        { text: t("ok") },
+      ]);
       return;
     }
 
@@ -38,19 +48,18 @@ export default function SignupScreen({ navigation }) {
     });
 
     if (error) {
-      Alert.alert("Sign Up Failed", error.message);
+      // FIX: Localized OK button
+      Alert.alert(t("signup_failed"), error.message, [{ text: t("ok") }]);
     } else {
-      Alert.alert(
-        "Success!",
-        "Account created! Please check your email to confirm.",
-        [{ text: "OK", onPress: () => navigation.replace("Login") }]
-      );
+      // FIX: Localized OK button
+      Alert.alert(t("success"), t("account_created"), [
+        { text: t("ok"), onPress: () => navigation.replace("Login") },
+      ]);
     }
     setLoading(false);
   };
 
   return (
-    // 3. SAFE AREA FIX: Dynamic Top Padding
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
@@ -64,7 +73,15 @@ export default function SignupScreen({ navigation }) {
             onPress={() => navigation.navigate("Welcome")}
             style={styles.backBtn}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={COLORS.textMain}
+              // Force flip if Hebrew/Arabic OR if the system is already in RTL mode
+              style={{
+                transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
+              }}
+            />
           </TouchableOpacity>
         </View>
 
@@ -74,25 +91,26 @@ export default function SignupScreen({ navigation }) {
             <View style={styles.iconCircle}>
               <Ionicons name="person-add" size={32} color={COLORS.primary} />
             </View>
-            <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.subtitle}>
-              Start optimizing your routes today.
-            </Text>
+            <Text style={styles.title}>{t("signup_title")}</Text>
+            <Text style={styles.subtitle}>{t("signup_subtitle")}</Text>
           </View>
 
           {/* FORM */}
           <View style={styles.form}>
-            <Text style={styles.label}>EMAIL</Text>
+            {/* EMAIL INPUT */}
+            <Text style={[styles.label, textAlignStyle]}>
+              {t("email_label")}
+            </Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="mail-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }}
               />
               <TextInput
-                style={styles.input}
-                placeholder="driver@example.com"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("signup_email_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={email}
                 onChangeText={setEmail}
@@ -101,17 +119,20 @@ export default function SignupScreen({ navigation }) {
               />
             </View>
 
-            <Text style={styles.label}>PASSWORD</Text>
+            {/* PASSWORD INPUT */}
+            <Text style={[styles.label, textAlignStyle]}>
+              {t("password_label")}
+            </Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="lock-closed-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }}
               />
               <TextInput
-                style={styles.input}
-                placeholder="Minimum 6 characters"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("signup_password_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={password}
                 onChangeText={setPassword}
@@ -127,20 +148,19 @@ export default function SignupScreen({ navigation }) {
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.signupText}>Create Account</Text>
+                <Text style={styles.signupText}>{t("create_account")}</Text>
               )}
             </TouchableOpacity>
 
             <View style={styles.footerRow}>
-              <Text style={styles.footerText}>Already have an account? </Text>
+              <Text style={styles.footerText}>{t("already_have_account")}</Text>
               <TouchableOpacity onPress={() => navigation.replace("Login")}>
-                <Text style={styles.loginLink}>Log In</Text>
+                <Text style={styles.loginLink}>{t("login_link")}</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
 
-        {/* 4. SAFE AREA FIX: Dynamic Bottom Padding */}
         <View style={{ height: 20 + insets.bottom }} />
       </KeyboardAvoidingView>
     </View>

@@ -3,6 +3,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, AppState, View } from "react-native";
+import "./src/i18n"; // <--- ADD THIS LINE AT THE TOP
 
 // IMPORT YOUR SCREENS
 import AddPassengerScreen from "./src/screens/AddPassengerScreen";

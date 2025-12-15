@@ -1,10 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useLayoutEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
   BackHandler,
   FlatList,
+  I18nManager,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
   Share,
@@ -15,44 +20,54 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 2. IMPORT ASYNC STORAGE
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function HomeScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation();
 
+  // CHECK: Is the active language Hebrew OR Arabic?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
+
+  // --- STATE MANAGEMENT ---
   const [passengers, setPassengers] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [loading, setLoading] = useState(true);
   const [destinationAddress, setDestinationAddress] = useState("");
   const [processingRoute, setProcessingRoute] = useState(false);
 
-  // HIDE DEFAULT HEADER
+  // --- EDIT MODAL STATE ---
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+
+  // --- REFS (Performance Caching) ---
+  const userIdRef = useRef(null);
+
+  // 1. LAYOUT CONFIGURATION
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // --- 3. BLOCK HARDWARE BACK BUTTON (Android) ---
+  // 2. HARDWARE BACK BUTTON HANDLER (Android)
   useEffect(() => {
     const backAction = () => {
-      // Minimizes the app instead of going back to Login
       BackHandler.exitApp();
-      return true; // Prevents default behavior
+      return true;
     };
-
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
       backAction
     );
-
     return () => backHandler.remove();
   }, []);
 
-  // --- LOGIC SECTION ---
+  // 3. HANDLE INCOMING PARAMS (From Import Screen)
   useEffect(() => {
     if (route.params?.importedDestination)
       setDestinationAddress(route.params.importedDestination);
@@ -64,6 +79,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, [route.params]);
 
+  // 4. FETCH DATA ON FOCUS
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () =>
       fetchPassengers()
@@ -71,28 +87,47 @@ export default function HomeScreen({ navigation, route }) {
     return unsubscribe;
   }, [navigation]);
 
+  const getUserId = async () => {
+    if (userIdRef.current) return userIdRef.current;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (user) {
+      userIdRef.current = user.id;
+      return user.id;
+    }
+    return null;
+  };
+
   const fetchPassengers = async () => {
     try {
-      setLoading(true);
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
+      if (passengers.length === 0) setLoading(true);
+
+      const currentUserId = await getUserId();
+      if (!currentUserId) {
         setLoading(false);
         return;
       }
-      const response = await fetch(`${API_URL}/passengers?userId=${user.id}`);
+
+      const response = await fetch(
+        `${API_URL}/passengers?userId=${currentUserId}`
+      );
       const data = await response.json();
+
       if (response.ok) setPassengers(data);
-      setLoading(false);
     } catch (error) {
+      console.error("Fetch Error:", error);
+    } finally {
       setLoading(false);
     }
   };
 
+  // --- ACTION HANDLERS ---
+
   const handleShare = async () => {
     if (selectedIds.length === 0)
-      return Alert.alert("Share", "Select passengers first.");
+      return Alert.alert(t("share_error"), "", [{ text: t("ok") }]);
     try {
       const response = await fetch(`${API_URL}/share`, {
         method: "POST",
@@ -105,19 +140,29 @@ export default function HomeScreen({ navigation, route }) {
       const data = await response.json();
       await Share.share({ message: `Route Import Code: ${data.code}` });
     } catch (error) {
-      Alert.alert("Error", "Share failed.");
+      Alert.alert(t("error_title"), "Share failed.", [{ text: t("ok") }]);
     }
   };
 
   const deletePassenger = async (id) => {
-    Alert.alert("Delete", "Remove this passenger?", [
-      { text: "Cancel" },
+    Alert.alert(t("remove"), t("delete_confirm"), [
+      { text: t("cancel"), style: "cancel" }, // FIX: Added style: cancel
       {
-        text: "Remove",
+        text: t("remove"),
         style: "destructive",
         onPress: async () => {
-          await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
-          fetchPassengers();
+          const previousList = [...passengers];
+          // Optimistic Update
+          setPassengers((prev) => prev.filter((p) => p.id !== id));
+
+          try {
+            await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
+          } catch (error) {
+            Alert.alert(t("error_title"), "Could not delete passenger.", [
+              { text: t("ok") },
+            ]);
+            setPassengers(previousList); // Revert on failure
+          }
         },
       },
     ]);
@@ -129,14 +174,72 @@ export default function HomeScreen({ navigation, route }) {
     else setSelectedIds([...selectedIds, id]);
   };
 
+  // --- EDIT LOGIC ---
+  const openEditModal = (passenger) => {
+    setEditId(passenger.id);
+    setEditName(passenger.name);
+    setEditAddress(passenger.address);
+    setEditModalVisible(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editName.trim() || !editAddress.trim()) {
+      return Alert.alert(t("missing_info"), t("validation_error"), [
+        { text: t("ok") },
+      ]);
+    }
+
+    const currentUserId = await getUserId();
+    if (!currentUserId) {
+      Alert.alert(t("error_title"), t("logged_in_error"), [{ text: t("ok") }]);
+      return;
+    }
+
+    // 1. Close Modal & Backup
+    setEditModalVisible(false);
+    const previousList = [...passengers];
+
+    // 2. Optimistic Update
+    setPassengers((prev) =>
+      prev.map((p) =>
+        p.id === editId ? { ...p, name: editName, address: editAddress } : p
+      )
+    );
+
+    // 3. Sync to Backend
+    try {
+      const response = await fetch(`${API_URL}/passengers/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName,
+          address: editAddress,
+          userId: currentUserId,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage =
+          errorData.error || `Server Error (${response.status})`;
+        throw new Error(errorMessage);
+      }
+    } catch (error) {
+      console.error("Save failed:", error);
+      Alert.alert(t("error_title"), error.message, [{ text: t("ok") }]);
+      setPassengers(previousList); // Rollback data
+    }
+  };
+
+  // --- MAP LOGIC ---
   const proceedToMap = async (passengersToTake) => {
     setProcessingRoute(true);
-
     try {
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
         destinationAddress
       )}&key=${apiKey}`;
+
       const response = await fetch(url);
       const data = await response.json();
       setProcessingRoute(false);
@@ -154,17 +257,23 @@ export default function HomeScreen({ navigation, route }) {
           finalDestination: destCoords,
         });
       } else {
-        Alert.alert("Error", "Destination address not found.");
+        Alert.alert(t("error_title"), "Destination address not found.", [
+          { text: t("ok") },
+        ]);
       }
     } catch (e) {
       setProcessingRoute(false);
-      Alert.alert("Error", "Connection failed.");
+      Alert.alert(t("connection_error_title"), t("connection_error_msg"), [
+        { text: t("ok") },
+      ]);
     }
   };
 
   const handleOptimize = () => {
     if (!destinationAddress.trim()) {
-      return Alert.alert("Missing Info", "Please enter a final destination.");
+      return Alert.alert(t("missing_info"), t("choose_dest"), [
+        { text: t("ok") },
+      ]);
     }
 
     const selectedPassengers = passengers.filter((p) =>
@@ -172,19 +281,13 @@ export default function HomeScreen({ navigation, route }) {
     );
 
     if (selectedPassengers.length === 0) {
+      // FIX: Localized Alert Titles, Messages, and Buttons
       Alert.alert(
-        "No Passengers Selected",
-        "You haven't selected anyone. Do you want to drive directly to the destination?",
+        t("alert_no_passengers_title"),
+        t("alert_no_passengers_msg"),
         [
-          {
-            text: "Add Passenger",
-            style: "cancel",
-            onPress: () => {},
-          },
-          {
-            text: "Drive Solo",
-            onPress: () => proceedToMap([]),
-          },
+          { text: t("cancel"), style: "cancel" },
+          { text: t("drive_solo"), onPress: () => proceedToMap([]) },
         ]
       );
     } else {
@@ -192,6 +295,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
+  // --- RENDER ITEM ---
   const renderPassenger = ({ item }) => {
     const isSelected = selectedIds.includes(item.id);
     return (
@@ -201,6 +305,7 @@ export default function HomeScreen({ navigation, route }) {
         style={[styles.card, isSelected && styles.cardSelected]}
       >
         <View style={styles.cardContent}>
+          {/* LEFT SIDE: Icon + Text */}
           <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
             <View
               style={[
@@ -232,12 +337,26 @@ export default function HomeScreen({ navigation, route }) {
             </View>
           </View>
 
-          <TouchableOpacity
-            onPress={() => deletePassenger(item.id)}
-            style={styles.trashBtn}
-          >
-            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-          </TouchableOpacity>
+          {/* RIGHT SIDE: Action Buttons */}
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              onPress={() => openEditModal(item)}
+              style={styles.actionBtn}
+            >
+              <Ionicons
+                name="create-outline"
+                size={22}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => deletePassenger(item.id)}
+              style={styles.actionBtn}
+            >
+              <Ionicons name="trash-outline" size={22} color="#EF4444" />
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -250,9 +369,7 @@ export default function HomeScreen({ navigation, route }) {
       <View style={styles.container}>
         {/* HEADER */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Route</Text>
-
-          {/* 4. UPDATED LOGOUT BUTTON: Clears Session Data */}
+          <Text style={styles.headerTitle}>{t("my_route")}</Text>
           <TouchableOpacity
             onPress={async () => {
               await supabase.auth.signOut();
@@ -268,16 +385,19 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* DESTINATION */}
+        {/* DESTINATION INPUT (RTL Support) */}
         <View style={styles.inputContainer}>
           <View style={styles.pinIcon}>
             <Ionicons name="flag" size={18} color="white" />
           </View>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
+            ]}
             value={destinationAddress}
             onChangeText={setDestinationAddress}
-            placeholder="Choose Destination..."
+            placeholder={t("choose_dest")}
           />
         </View>
 
@@ -290,7 +410,7 @@ export default function HomeScreen({ navigation, route }) {
               color={COLORS.textSub}
               style={{ marginRight: 5 }}
             />
-            <Text style={styles.sectionTitle}>Passengers</Text>
+            <Text style={styles.sectionTitle}>{t("passengers")}</Text>
           </View>
 
           <TouchableOpacity
@@ -300,11 +420,13 @@ export default function HomeScreen({ navigation, route }) {
             <Ionicons name="add" size={30} color="white" />
           </TouchableOpacity>
 
-          <Text style={styles.totalCount}>{passengers.length} Total</Text>
+          <Text style={styles.totalCount}>
+            {passengers.length} {t("total")}
+          </Text>
         </View>
 
         {/* LIST */}
-        {loading ? (
+        {loading && passengers.length === 0 ? (
           <ActivityIndicator
             size="large"
             color={COLORS.primary}
@@ -326,7 +448,7 @@ export default function HomeScreen({ navigation, route }) {
               <View style={styles.emptyState}>
                 <Ionicons name="people-outline" size={60} color="#E5E7EB" />
                 <Text style={{ color: COLORS.textSub, marginTop: 10 }}>
-                  List is empty
+                  {t("list_empty")}
                 </Text>
               </View>
             }
@@ -345,7 +467,7 @@ export default function HomeScreen({ navigation, route }) {
               />
               <Text style={styles.footerCount}>{selectedIds.length}</Text>
             </View>
-            <Text style={styles.footerLabel}>Selected</Text>
+            <Text style={styles.footerLabel}>{t("selected")}</Text>
           </View>
 
           <View style={styles.footerSectionMiddle}>
@@ -375,6 +497,62 @@ export default function HomeScreen({ navigation, route }) {
           </View>
         </View>
       </View>
+
+      {/* --- EDIT MODAL (RTL Support) --- */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={editModalVisible}
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t("edit_passenger")}</Text>
+
+            <Text style={styles.label}>{t("name")}</Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
+              ]}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder={t("name")}
+            />
+
+            <Text style={styles.label}>{t("address")}</Text>
+            <TextInput
+              style={[
+                styles.modalInput,
+                { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
+              ]}
+              value={editAddress}
+              onChangeText={setEditAddress}
+              placeholder={t("address")}
+              multiline={true}
+            />
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.cancelBtn]}
+                onPress={() => setEditModalVisible(false)}
+              >
+                <Text style={styles.cancelText}>{t("cancel")}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.saveBtn]}
+                onPress={saveEdit}
+              >
+                <Text style={styles.saveText}>{t("save_changes")}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -387,6 +565,7 @@ const styles = StyleSheet.create({
   },
   container: { flex: 1, paddingHorizontal: 20 },
 
+  // HEADER
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -397,6 +576,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 30, fontWeight: "800", color: COLORS.textMain },
   logoutBtn: { backgroundColor: "#FEE2E2", padding: 8, borderRadius: 12 },
 
+  // INPUT
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -424,6 +604,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  // ACTION BAR
   actionBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -445,8 +626,8 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
 
+  // LIST ITEMS
   listContent: { flexGrow: 1 },
-
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
@@ -460,7 +641,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-
   iconBox: {
     width: 45,
     height: 45,
@@ -471,10 +651,15 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "bold", color: COLORS.textMain },
   row: { flexDirection: "row", alignItems: "center", marginTop: 4 },
   address: { fontSize: 13, color: COLORS.textSub, marginLeft: 4, width: "90%" },
-  trashBtn: { padding: 10 },
 
+  // ACTION BUTTONS (Edit/Delete)
+  actionRow: { flexDirection: "row" },
+  actionBtn: { padding: 8, marginLeft: 5 },
+
+  // EMPTY STATE
   emptyState: { alignItems: "center", marginTop: 50, opacity: 0.5 },
 
+  // FOOTER
   footer: {
     position: "absolute",
     left: 20,
@@ -487,7 +672,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     ...SHADOWS.medium,
   },
-
   footerSectionLeft: { flex: 1, justifyContent: "center" },
   footerSectionMiddle: {
     flex: 1.5,
@@ -496,7 +680,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   footerSectionRight: { flex: 1, alignItems: "flex-end" },
-
   footerLabel: {
     fontSize: 10,
     color: COLORS.textSub,
@@ -505,9 +688,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   footerCount: { fontSize: 22, fontWeight: "800", color: COLORS.textMain },
-
   iconBtn: { padding: 12, backgroundColor: "#F3F4F6", borderRadius: 12 },
-
   goBtn: {
     backgroundColor: COLORS.primary,
     width: 60,
@@ -518,4 +699,66 @@ const styles = StyleSheet.create({
     ...SHADOWS.medium,
   },
   disabledBtn: { backgroundColor: "#CBD5E1" },
+
+  // MODAL STYLES
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: "white",
+    borderRadius: 20,
+    padding: 20,
+    ...SHADOWS.medium,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: COLORS.textMain,
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: COLORS.textSub,
+    marginBottom: 5,
+    marginLeft: 5,
+  },
+  modalInput: {
+    backgroundColor: "#F3F4F6",
+    borderRadius: 12,
+    padding: 15,
+    fontSize: 16,
+    color: COLORS.textMain,
+    marginBottom: 15,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 10,
+  },
+  modalBtn: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  cancelBtn: {
+    backgroundColor: "#F3F4F6",
+    marginEnd: 10, // RTL Safe
+  },
+  saveBtn: {
+    backgroundColor: COLORS.primary,
+  },
+  cancelText: {
+    color: COLORS.textSub,
+    fontWeight: "bold",
+  },
+  saveText: {
+    color: "white",
+    fontWeight: "bold",
+  },
 });

@@ -1,5 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import {
+  I18nManager,
   Image,
   Platform,
   StatusBar,
@@ -8,33 +10,32 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT THE HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function WelcomeScreen({ navigation }) {
-  // 2. GET THE INSETS
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation(); // <--- Get i18n object
 
-  // 3. NAVIGATION HANDLERS
+  // CHECK: Is the current language RTL (Hebrew OR Arabic)?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
+
+  // NAVIGATION HANDLERS
   const handleGetStarted = () => {
-    // New User -> Go to Signup
     navigation.navigate("Signup");
   };
 
   const handleLogin = () => {
-    // Existing User -> Go to Login
     navigation.navigate("Login");
   };
 
   return (
-    // 4. USE VIEW WITH DYNAMIC PADDING (Replaces SafeAreaView for better control)
     <View
       style={[
         styles.container,
         {
-          paddingTop: Platform.OS === "android" ? 30 : insets.top, // Handle Status Bar
-          paddingBottom: 20 + insets.bottom, // Lift buttons above Swipe Bar
+          paddingTop: Platform.OS === "android" ? 30 : insets.top,
+          paddingBottom: 20 + insets.bottom,
         },
       ]}
     >
@@ -52,42 +53,49 @@ export default function WelcomeScreen({ navigation }) {
         <Text style={styles.appTitle}>
           Navi<Text style={{ color: COLORS.primary }}>Go</Text>
         </Text>
-        <Text style={styles.tagline}>Smart routes. Faster rides.</Text>
+        <Text style={styles.tagline}>{t("welcome_tagline")}</Text>
 
-        <Text style={styles.description}>
-          Plan the shortest route to pick up all passengers — automatically.
-        </Text>
+        <Text style={styles.description}>{t("welcome_description")}</Text>
       </View>
 
       {/* 2. KEY BENEFITS */}
       <View style={styles.benefitsContainer}>
         <BenefitRow
           icon="car-sport"
-          text="Optimized routes – save time & fuel"
+          text={t("benefit_optimized")}
+          isRTL={isRTL}
         />
-        <BenefitRow icon="map" text="Multiple pickups – one smart path" />
-        <BenefitRow icon="flash" text="One-tap navigation" />
+        <BenefitRow icon="map" text={t("benefit_pickups")} isRTL={isRTL} />
+        <BenefitRow icon="flash" text={t("benefit_navigation")} isRTL={isRTL} />
       </View>
 
-      {/* 3. PRIMARY ACTIONS (Bottom) */}
+      {/* 3. PRIMARY ACTIONS */}
       <View style={styles.footer}>
         {/* Primary Button -> Signup */}
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={handleGetStarted}
         >
-          <Text style={styles.primaryButtonText}>Get Started</Text>
+          <Text style={styles.primaryButtonText}>{t("get_started")}</Text>
+
+          {/* ARROW ICON */}
           <Ionicons
             name="arrow-forward"
             size={20}
             color="white"
-            style={{ marginLeft: 10 }}
+            style={[
+              styles.btnIcon,
+              // Force flip if Hebrew/Arabic OR if the system is already in RTL mode
+              {
+                transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
+              },
+            ]}
           />
         </TouchableOpacity>
 
         {/* Secondary Button -> Login */}
         <TouchableOpacity style={styles.secondaryButton} onPress={handleLogin}>
-          <Text style={styles.secondaryButtonText}>Log In</Text>
+          <Text style={styles.secondaryButtonText}>{t("login")}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -95,12 +103,26 @@ export default function WelcomeScreen({ navigation }) {
 }
 
 // Helper Component for Bullet Points
-const BenefitRow = ({ icon, text }) => (
+const BenefitRow = ({ icon, text, isRTL }) => (
   <View style={styles.benefitRow}>
-    <View style={styles.iconCircle}>
+    <View
+      style={[
+        styles.iconCircle,
+        // Swap margin side based on language (Instant update)
+        isRTL ? { marginLeft: 15 } : { marginRight: 15 },
+      ]}
+    >
       <Ionicons name={icon} size={24} color={COLORS.primary} />
     </View>
-    <Text style={styles.benefitText}>{text}</Text>
+    <Text
+      style={[
+        styles.benefitText,
+        // Align text right for RTL, Left for English (Instant update)
+        { textAlign: isRTL ? "right" : "left" },
+      ]}
+    >
+      {text}
+    </Text>
   </View>
 );
 
@@ -110,7 +132,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingHorizontal: 24,
     justifyContent: "space-between",
-    // Note: Padding Top/Bottom are handled dynamically in JSX
   },
 
   // --- HERO SECTION ---
@@ -142,6 +163,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: COLORS.textSub,
     marginBottom: 20,
+    textAlign: "center",
   },
   description: {
     fontSize: 16,
@@ -154,17 +176,27 @@ const styles = StyleSheet.create({
   // --- BENEFITS SECTION ---
   benefitsContainer: { justifyContent: "center", marginVertical: 20 },
 
-  benefitRow: { flexDirection: "row", alignItems: "center", marginBottom: 20 },
+  benefitRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+
   iconCircle: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#DBEAFE", // Very light blue
+    backgroundColor: "#DBEAFE",
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 15,
   },
-  benefitText: { fontSize: 16, fontWeight: "600", color: COLORS.textMain },
+
+  benefitText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: COLORS.textMain,
+    flex: 1,
+  },
 
   // --- FOOTER BUTTONS ---
   footer: { width: "100%" },
@@ -180,6 +212,10 @@ const styles = StyleSheet.create({
     ...SHADOWS.medium,
   },
   primaryButtonText: { color: "white", fontSize: 18, fontWeight: "bold" },
+
+  btnIcon: {
+    marginStart: 10,
+  },
 
   secondaryButton: {
     backgroundColor: "white",

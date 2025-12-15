@@ -1,8 +1,10 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLayoutEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  I18nManager,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -14,28 +16,35 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT THE HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 export default function AddPassengerScreen({ navigation }) {
-  // 2. GET THE INSETS
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation(); // <--- Get i18n instance
+
+  // CHECK: Is the active language Hebrew OR Arabic?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
 
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Hide default header
+  // Helper for RTL Text Alignment (Updates instantly)
+  const textAlignStyle = { textAlign: isRTL ? "right" : "left" };
+
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
   const handleSave = async () => {
     if (!name.trim() || !address.trim()) {
-      Alert.alert("Missing Info", "Please enter both name and address.");
+      // FIX: Localized Alert & Button
+      Alert.alert(t("missing_info"), t("validation_error"), [
+        { text: t("ok") },
+      ]);
       return;
     }
 
@@ -46,7 +55,10 @@ export default function AddPassengerScreen({ navigation }) {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        Alert.alert("Error", "You must be logged in.");
+        // FIX: Localized Alert & Button
+        Alert.alert(t("error_title"), t("logged_in_error"), [
+          { text: t("ok") },
+        ]);
         setLoading(false);
         return;
       }
@@ -65,10 +77,14 @@ export default function AddPassengerScreen({ navigation }) {
         navigation.goBack();
       } else {
         const errorData = await response.json();
-        Alert.alert("Error", errorData.error || "Could not save");
+        // FIX: Localized Alert & Button
+        Alert.alert(t("error_title"), errorData.error || "Could not save", [
+          { text: t("ok") },
+        ]);
       }
     } catch (error) {
-      Alert.alert("Error", "Could not connect to server");
+      // FIX: Localized Alert & Button
+      Alert.alert(t("error_title"), t("server_error"), [{ text: t("ok") }]);
     } finally {
       setLoading(false);
     }
@@ -78,24 +94,31 @@ export default function AddPassengerScreen({ navigation }) {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
 
-      {/* WRAPPER: Handles Keyboard pushing content up */}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.keyboardView}
       >
-        {/* HEADER (Fixed at top) */}
+        {/* HEADER */}
         <View style={styles.header}>
           <TouchableOpacity
             onPress={() => navigation.goBack()}
             style={styles.backBtn}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={COLORS.textMain}
+              // Force flip if Hebrew OR if the system is already in RTL mode
+              style={{
+                transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
+              }}
+            />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Add Passenger</Text>
+          <Text style={styles.headerTitle}>{t("add_passenger_title")}</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        {/* SCROLLABLE CONTENT (Hero + Form) */}
+        {/* SCROLLABLE CONTENT */}
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -106,22 +129,25 @@ export default function AddPassengerScreen({ navigation }) {
             <View style={styles.heroCircle}>
               <Ionicons name="person-add" size={40} color="white" />
             </View>
-            <Text style={styles.heroText}>Create New Passenger</Text>
+            <Text style={styles.heroText}>{t("create_new_passenger")}</Text>
           </View>
 
           {/* FORM INPUTS */}
           <View style={styles.form}>
-            <Text style={styles.label}>FULL NAME</Text>
+            {/* FULL NAME */}
+            <Text style={[styles.label, textAlignStyle]}>
+              {t("full_name_label")}
+            </Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="person-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }} // RTL Safe
               />
               <TextInput
-                style={styles.input}
-                placeholder="e.g. Sarah Connor"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("name_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={name}
                 onChangeText={setName}
@@ -129,17 +155,20 @@ export default function AddPassengerScreen({ navigation }) {
               />
             </View>
 
-            <Text style={styles.label}>PICKUP ADDRESS</Text>
+            {/* PICKUP ADDRESS */}
+            <Text style={[styles.label, textAlignStyle]}>
+              {t("pickup_address_label")}
+            </Text>
             <View style={styles.inputWrapper}>
               <Ionicons
                 name="location-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }} // RTL Safe
               />
               <TextInput
-                style={styles.input}
-                placeholder="e.g. Rothschild Blvd 10, Tel Aviv"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("address_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={address}
                 onChangeText={setAddress}
@@ -149,13 +178,8 @@ export default function AddPassengerScreen({ navigation }) {
           </View>
         </ScrollView>
 
-        {/* 3. FOOTER BUTTON: Dynamic Padding applied here */}
-        <View
-          style={[
-            styles.footer,
-            { paddingBottom: 20 + insets.bottom }, // Lifts up based on device safe area
-          ]}
-        >
+        {/* FOOTER BUTTON */}
+        <View style={[styles.footer, { paddingBottom: 20 + insets.bottom }]}>
           <TouchableOpacity
             style={[styles.saveButton, loading && styles.disabledButton]}
             onPress={handleSave}
@@ -165,12 +189,12 @@ export default function AddPassengerScreen({ navigation }) {
               <ActivityIndicator color="white" />
             ) : (
               <View style={{ flexDirection: "row", alignItems: "center" }}>
-                <Text style={styles.saveText}>Confirm & Add</Text>
+                <Text style={styles.saveText}>{t("confirm_add")}</Text>
                 <Ionicons
                   name="checkmark-circle"
                   size={24}
                   color="white"
-                  style={{ marginLeft: 10 }}
+                  style={{ marginStart: 10 }} // RTL Safe
                 />
               </View>
             )}
@@ -187,8 +211,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingTop: Platform.OS === "android" ? 30 : 0,
   },
-
-  // Important: Tells the view to fill the screen
   keyboardView: { flex: 1 },
 
   // Header
@@ -207,7 +229,6 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
 
-  // Scroll Content (Adds padding so things don't stick to edges)
   scrollContent: { paddingHorizontal: 24, paddingBottom: 20 },
 
   // Hero Section
@@ -250,7 +271,6 @@ const styles = StyleSheet.create({
   // Footer
   footer: {
     paddingHorizontal: 24,
-    // paddingBottom: 20, <--- REMOVED (Now dynamic in JSX)
     paddingTop: 10,
     backgroundColor: COLORS.background,
   },

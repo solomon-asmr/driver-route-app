@@ -1,8 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  I18nManager,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -13,22 +16,34 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// 1. IMPORT THE HOOK
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
-// 2. IMPORT ASYNC STORAGE (For Session persistence)
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function LoginScreen({ navigation }) {
-  // 3. GET INSETS
   const insets = useSafeAreaInsets();
+  const { t, i18n } = useTranslation();
+
+  // CHECK: Is the active language Hebrew OR Arabic?
+  const isRTL = i18n.language === "he" || i18n.language === "ar";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Helper for RTL Text Alignment (Updates instantly)
+  const textAlignStyle = { textAlign: isRTL ? "right" : "left" };
+
   const handleLogin = async () => {
+    // 1. CLIENT-SIDE VALIDATION
+    if (!email || !password) {
+      // FIX: Localized Alert & Button
+      Alert.alert(t("missing_info"), t("enter_email_password"), [
+        { text: t("ok") },
+      ]);
+      return;
+    }
+
     setLoading(true);
     const { error } = await supabase.auth.signInWithPassword({
       email: email,
@@ -36,10 +51,10 @@ export default function LoginScreen({ navigation }) {
     });
 
     if (error) {
-      Alert.alert("Login Failed", error.message);
+      // FIX: Localized OK Button for server errors
+      Alert.alert(t("login_failed"), error.message, [{ text: t("ok") }]);
       setLoading(false);
     } else {
-      // 4. SAVE SESSION DATA BEFORE NAVIGATING
       try {
         await AsyncStorage.setItem("isLoggedIn", "true");
         await AsyncStorage.setItem(
@@ -50,8 +65,11 @@ export default function LoginScreen({ navigation }) {
         console.error("Failed to save session", e);
       }
 
-      // Success! Go to Home
-      navigation.replace("Home");
+      // Reset navigation stack so user can't go back to login
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Home" }],
+      });
     }
   };
 
@@ -69,7 +87,15 @@ export default function LoginScreen({ navigation }) {
             onPress={() => navigation.replace("Welcome")}
             style={styles.backBtn}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textMain} />
+            <Ionicons
+              name="arrow-back"
+              size={24}
+              color={COLORS.textMain}
+              // Force flip if Hebrew/Arabic OR if the system is already in RTL mode
+              style={{
+                transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
+              }}
+            />
           </TouchableOpacity>
         </View>
 
@@ -82,8 +108,8 @@ export default function LoginScreen({ navigation }) {
                 style={styles.logoImage}
               />
             </View>
-            <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.subtitle}>Sign in to continue</Text>
+            <Text style={styles.title}>{t("welcome_back")}</Text>
+            <Text style={styles.subtitle}>{t("sign_in_continue")}</Text>
           </View>
 
           {/* FORM */}
@@ -93,11 +119,11 @@ export default function LoginScreen({ navigation }) {
                 name="mail-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }} // RTL Safe
               />
               <TextInput
-                style={styles.input}
-                placeholder="Email Address"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("email_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={email}
                 onChangeText={setEmail}
@@ -111,11 +137,11 @@ export default function LoginScreen({ navigation }) {
                 name="lock-closed-outline"
                 size={20}
                 color={COLORS.textSub}
-                style={{ marginRight: 10 }}
+                style={{ marginEnd: 10 }} // RTL Safe
               />
               <TextInput
-                style={styles.input}
-                placeholder="Password"
+                style={[styles.input, textAlignStyle]}
+                placeholder={t("password_placeholder")}
                 placeholderTextColor={COLORS.textSub}
                 value={password}
                 onChangeText={setPassword}
@@ -131,14 +157,14 @@ export default function LoginScreen({ navigation }) {
               {loading ? (
                 <ActivityIndicator color="white" />
               ) : (
-                <Text style={styles.loginText}>Log In</Text>
+                <Text style={styles.loginText}>{t("login_button")}</Text>
               )}
             </TouchableOpacity>
 
             <View style={styles.footerRow}>
-              <Text style={styles.footerText}>New here? </Text>
+              <Text style={styles.footerText}>{t("new_here")}</Text>
               <TouchableOpacity onPress={() => navigation.navigate("Signup")}>
-                <Text style={styles.signupText}>Create Account</Text>
+                <Text style={styles.signupText}>{t("create_account")}</Text>
               </TouchableOpacity>
             </View>
           </View>
