@@ -1,6 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -26,70 +33,136 @@ import { API_URL } from "../config";
 import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
+/* -------------------------------------------------------------------------- */
+/* OPTIMIZED ROW                                 */
+/* -------------------------------------------------------------------------- */
+
+const PassengerRow = memo(function PassengerRow({
+  item,
+  isSelected,
+  onToggle,
+  onEdit,
+  onDelete,
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={() => onToggle(item.id)}
+      style={[styles.card, isSelected && styles.cardSelected]}
+    >
+      <View style={styles.cardContent}>
+        {/* Left Side: Icon + Details */}
+        <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
+          <View
+            style={[
+              styles.iconBox,
+              { backgroundColor: isSelected ? COLORS.secondary : "#F3F4F6" },
+            ]}
+          >
+            <Ionicons
+              name="person"
+              size={24}
+              color={isSelected ? "white" : COLORS.textSub}
+            />
+          </View>
+
+          <View style={{ marginLeft: 15, flex: 1 }}>
+            <Text style={styles.name}>{item.name}</Text>
+            <View style={styles.row}>
+              <Ionicons
+                name="location-sharp"
+                size={14}
+                color={COLORS.primary}
+              />
+              <Text style={styles.address} numberOfLines={1}>
+                {item.address}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Right Side: Actions */}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            onPress={() => onEdit(item)}
+            style={styles.actionBtn}
+          >
+            <Ionicons name="create-outline" size={22} color={COLORS.primary} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => onDelete(item.id)}
+            style={styles.actionBtn}
+          >
+            <Ionicons name="trash-outline" size={22} color="#EF4444" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* MAIN SCREEN                                  */
+/* -------------------------------------------------------------------------- */
+
 export default function HomeScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { t, i18n } = useTranslation();
 
-  // CHECK: Is the active language Hebrew OR Arabic?
+  // RTL Check
   const isRTL = i18n.language === "he" || i18n.language === "ar";
 
-  // --- STATE MANAGEMENT ---
+  /* --------------------------------- State --------------------------------- */
   const [passengers, setPassengers] = useState([]);
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [selectedSet, setSelectedSet] = useState(new Set()); // Fast Set for performance
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [destinationAddress, setDestinationAddress] = useState("");
   const [processingRoute, setProcessingRoute] = useState(false);
 
-  // --- EDIT MODAL STATE ---
+  // Edit Modal State
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editAddress, setEditAddress] = useState("");
 
-  // --- REFS (Performance Caching) ---
+  /* ---------------------------------- Refs --------------------------------- */
   const userIdRef = useRef(null);
+  const isFetchingRef = useRef(false);
 
-  // 1. LAYOUT CONFIGURATION
+  /* --------------------------------- Layout -------------------------------- */
   useLayoutEffect(() => {
     navigation.setOptions({ headerShown: false });
   }, [navigation]);
 
-  // 2. HARDWARE BACK BUTTON HANDLER (Android)
   useEffect(() => {
-    const backAction = () => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       BackHandler.exitApp();
       return true;
-    };
-    const backHandler = BackHandler.addEventListener(
-      "hardwareBackPress",
-      backAction
-    );
-    return () => backHandler.remove();
+    });
+    return () => sub.remove();
   }, []);
 
-  // 3. HANDLE INCOMING PARAMS (From Import Screen)
+  /* ----------------------------- Initialization ---------------------------- */
   useEffect(() => {
+    // Check if we have incoming params from Import Screen
     if (route.params?.importedDestination)
       setDestinationAddress(route.params.importedDestination);
+
     if (route.params?.importedIds) {
-      setSelectedIds((prev) => [
-        ...new Set([...prev, ...route.params.importedIds]),
-      ]);
+      setSelectedSet((prev) => {
+        const next = new Set(prev);
+        route.params.importedIds.forEach((id) => next.add(id));
+        return next;
+      });
+      // Clear params to avoid loop
       navigation.setParams({ importedDestination: null, importedIds: null });
     }
   }, [route.params]);
 
-  // 4. FETCH DATA ON FOCUS
-  useEffect(() => {
-    const unsubscribe = navigation.addListener("focus", () =>
-      fetchPassengers()
-    );
-    return unsubscribe;
-  }, [navigation]);
-
   const getUserId = async () => {
     if (userIdRef.current) return userIdRef.current;
-
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -100,40 +173,92 @@ export default function HomeScreen({ navigation, route }) {
     return null;
   };
 
-  const fetchPassengers = async () => {
-    try {
-      if (passengers.length === 0) setLoading(true);
+  /* ------------------------------- Data Fetch ------------------------------- */
+  const fetchPassengers = useCallback(async (isRefresh = false) => {
+    if (isFetchingRef.current) return;
 
-      const currentUserId = await getUserId();
-      if (!currentUserId) {
-        setLoading(false);
-        return;
-      }
-
-      const response = await fetch(
-        `${API_URL}/passengers?userId=${currentUserId}`
-      );
-      const data = await response.json();
-
-      if (response.ok) setPassengers(data);
-    } catch (error) {
-      console.error("Fetch Error:", error);
-    } finally {
+    const uid = await getUserId();
+    if (!uid) {
       setLoading(false);
+      return;
     }
+
+    isFetchingRef.current = true;
+    // Only show full loading spinner on FIRST load, not refreshes
+    if (isRefresh) setRefreshing(true);
+
+    try {
+      const res = await fetch(`${API_URL}/passengers?userId=${uid}`);
+      const data = await res.json();
+      if (res.ok) setPassengers(data);
+    } catch (e) {
+      console.error("Fetch failed", e);
+    } finally {
+      isFetchingRef.current = false;
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Fetch on Focus (Auto-update silently)
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("focus", () => {
+      // If we already have data, don't set loading=true, just silent update
+      const shouldShowSpinner = passengers.length === 0;
+      if (shouldShowSpinner) setLoading(true);
+      fetchPassengers();
+    });
+    return unsubscribe;
+  }, [navigation, fetchPassengers, passengers.length]);
+
+  /* ------------------------------ Selection -------------------------------- */
+  const togglePassenger = useCallback((id) => {
+    setSelectedSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /* ------------------------------- Actions --------------------------------- */
+  const deletePassenger = (id) => {
+    Alert.alert(t("remove"), t("delete_confirm"), [
+      { text: t("cancel"), style: "cancel" },
+      {
+        text: t("remove"),
+        style: "destructive",
+        onPress: async () => {
+          // Optimistic UI Update
+          setPassengers((prev) => prev.filter((p) => p.id !== id));
+          if (selectedSet.has(id)) {
+            setSelectedSet((prev) => {
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+          }
+          try {
+            await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
+          } catch {
+            fetchPassengers(); // Revert on fail
+          }
+        },
+      },
+    ]);
   };
 
-  // --- ACTION HANDLERS ---
-
   const handleShare = async () => {
-    if (selectedIds.length === 0)
+    const selectedArray = Array.from(selectedSet);
+    if (selectedArray.length === 0)
       return Alert.alert(t("share_error"), "", [{ text: t("ok") }]);
+
     try {
       const response = await fetch(`${API_URL}/share`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          passengerIds: selectedIds,
+          passengerIds: selectedArray,
           destination: destinationAddress,
         }),
       });
@@ -144,94 +269,7 @@ export default function HomeScreen({ navigation, route }) {
     }
   };
 
-  const deletePassenger = async (id) => {
-    Alert.alert(t("remove"), t("delete_confirm"), [
-      { text: t("cancel"), style: "cancel" }, // FIX: Added style: cancel
-      {
-        text: t("remove"),
-        style: "destructive",
-        onPress: async () => {
-          const previousList = [...passengers];
-          // Optimistic Update
-          setPassengers((prev) => prev.filter((p) => p.id !== id));
-
-          try {
-            await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
-          } catch (error) {
-            Alert.alert(t("error_title"), "Could not delete passenger.", [
-              { text: t("ok") },
-            ]);
-            setPassengers(previousList); // Revert on failure
-          }
-        },
-      },
-    ]);
-  };
-
-  const togglePassenger = (id) => {
-    if (selectedIds.includes(id))
-      setSelectedIds(selectedIds.filter((pid) => pid !== id));
-    else setSelectedIds([...selectedIds, id]);
-  };
-
-  // --- EDIT LOGIC ---
-  const openEditModal = (passenger) => {
-    setEditId(passenger.id);
-    setEditName(passenger.name);
-    setEditAddress(passenger.address);
-    setEditModalVisible(true);
-  };
-
-  const saveEdit = async () => {
-    if (!editName.trim() || !editAddress.trim()) {
-      return Alert.alert(t("missing_info"), t("validation_error"), [
-        { text: t("ok") },
-      ]);
-    }
-
-    const currentUserId = await getUserId();
-    if (!currentUserId) {
-      Alert.alert(t("error_title"), t("logged_in_error"), [{ text: t("ok") }]);
-      return;
-    }
-
-    // 1. Close Modal & Backup
-    setEditModalVisible(false);
-    const previousList = [...passengers];
-
-    // 2. Optimistic Update
-    setPassengers((prev) =>
-      prev.map((p) =>
-        p.id === editId ? { ...p, name: editName, address: editAddress } : p
-      )
-    );
-
-    // 3. Sync to Backend
-    try {
-      const response = await fetch(`${API_URL}/passengers/${editId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: editName,
-          address: editAddress,
-          userId: currentUserId,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage =
-          errorData.error || `Server Error (${response.status})`;
-        throw new Error(errorMessage);
-      }
-    } catch (error) {
-      console.error("Save failed:", error);
-      Alert.alert(t("error_title"), error.message, [{ text: t("ok") }]);
-      setPassengers(previousList); // Rollback data
-    }
-  };
-
-  // --- MAP LOGIC ---
+  /* ------------------------------- Routing --------------------------------- */
   const proceedToMap = async (passengersToTake) => {
     setProcessingRoute(true);
     try {
@@ -276,12 +314,9 @@ export default function HomeScreen({ navigation, route }) {
       ]);
     }
 
-    const selectedPassengers = passengers.filter((p) =>
-      selectedIds.includes(p.id)
-    );
+    const selectedArray = passengers.filter((p) => selectedSet.has(p.id));
 
-    if (selectedPassengers.length === 0) {
-      // FIX: Localized Alert Titles, Messages, and Buttons
+    if (selectedArray.length === 0) {
       Alert.alert(
         t("alert_no_passengers_title"),
         t("alert_no_passengers_msg"),
@@ -291,76 +326,63 @@ export default function HomeScreen({ navigation, route }) {
         ]
       );
     } else {
-      proceedToMap(selectedPassengers);
+      proceedToMap(selectedArray);
     }
   };
 
-  // --- RENDER ITEM ---
-  const renderPassenger = ({ item }) => {
-    const isSelected = selectedIds.includes(item.id);
-    return (
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={() => togglePassenger(item.id)}
-        style={[styles.card, isSelected && styles.cardSelected]}
-      >
-        <View style={styles.cardContent}>
-          {/* LEFT SIDE: Icon + Text */}
-          <View style={{ flexDirection: "row", alignItems: "center", flex: 1 }}>
-            <View
-              style={[
-                styles.iconBox,
-                isSelected
-                  ? { backgroundColor: COLORS.secondary }
-                  : { backgroundColor: "#F3F4F6" },
-              ]}
-            >
-              <Ionicons
-                name="person"
-                size={24}
-                color={isSelected ? "white" : COLORS.textSub}
-              />
-            </View>
+  /* ------------------------------- Edit ----------------------------------- */
+  const saveEdit = async () => {
+    if (!editName.trim() || !editAddress.trim()) {
+      return Alert.alert(t("missing_info"), t("validation_error"), [
+        { text: t("ok") },
+      ]);
+    }
+    setEditModalVisible(false);
 
-            <View style={{ marginLeft: 15, flex: 1 }}>
-              <Text style={styles.name}>{item.name}</Text>
-              <View style={styles.row}>
-                <Ionicons
-                  name="location-sharp"
-                  size={14}
-                  color={COLORS.primary}
-                />
-                <Text style={styles.address} numberOfLines={1}>
-                  {item.address}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* RIGHT SIDE: Action Buttons */}
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              onPress={() => openEditModal(item)}
-              style={styles.actionBtn}
-            >
-              <Ionicons
-                name="create-outline"
-                size={22}
-                color={COLORS.primary}
-              />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => deletePassenger(item.id)}
-              style={styles.actionBtn}
-            >
-              <Ionicons name="trash-outline" size={22} color="#EF4444" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
+    // Optimistic Update
+    setPassengers((prev) =>
+      prev.map((p) =>
+        p.id === editId ? { ...p, name: editName, address: editAddress } : p
+      )
     );
+
+    const uid = await getUserId();
+    if (!uid) return;
+
+    try {
+      await fetch(`${API_URL}/passengers/${editId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName,
+          address: editAddress,
+          userId: uid,
+        }),
+      });
+    } catch (e) {
+      console.error("Save edit failed", e);
+      fetchPassengers(); // Revert
+    }
   };
+
+  /* ------------------------------- Rendering -------------------------------- */
+  const renderItem = useCallback(
+    ({ item }) => (
+      <PassengerRow
+        item={item}
+        isSelected={selectedSet.has(item.id)}
+        onToggle={togglePassenger}
+        onEdit={(p) => {
+          setEditId(p.id);
+          setEditName(p.name);
+          setEditAddress(p.address);
+          setEditModalVisible(true);
+        }}
+        onDelete={deletePassenger}
+      />
+    ),
+    [selectedSet, togglePassenger, t]
+  );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -385,7 +407,7 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* DESTINATION INPUT (RTL Support) */}
+        {/* INPUT */}
         <View style={styles.inputContainer}>
           <View style={styles.pinIcon}>
             <Ionicons name="flag" size={18} color="white" />
@@ -412,37 +434,32 @@ export default function HomeScreen({ navigation, route }) {
             />
             <Text style={styles.sectionTitle}>{t("passengers")}</Text>
           </View>
-
           <TouchableOpacity
             style={styles.addBtn}
             onPress={() => navigation.navigate("AddPassenger")}
           >
             <Ionicons name="add" size={30} color="white" />
           </TouchableOpacity>
-
           <Text style={styles.totalCount}>
             {passengers.length} {t("total")}
           </Text>
         </View>
 
         {/* LIST */}
-        {loading && passengers.length === 0 ? (
+        {loading ? (
           <ActivityIndicator
             size="large"
             color={COLORS.primary}
-            style={{ marginTop: 50 }}
+            style={{ marginTop: 60 }}
           />
         ) : (
           <FlatList
             data={passengers}
             keyExtractor={(item) => item.id.toString()}
-            renderItem={renderPassenger}
-            contentContainerStyle={[
-              styles.listContent,
-              { paddingBottom: 150 + insets.bottom },
-            ]}
-            onRefresh={fetchPassengers}
-            refreshing={loading}
+            renderItem={renderItem}
+            refreshing={refreshing}
+            onRefresh={() => fetchPassengers(true)}
+            contentContainerStyle={{ paddingBottom: 160 + insets.bottom }}
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={
               <View style={styles.emptyState}>
@@ -465,7 +482,7 @@ export default function HomeScreen({ navigation, route }) {
                 color={COLORS.primary}
                 style={{ marginRight: 8 }}
               />
-              <Text style={styles.footerCount}>{selectedIds.length}</Text>
+              <Text style={styles.footerCount}>{selectedSet.size}</Text>
             </View>
             <Text style={styles.footerLabel}>{t("selected")}</Text>
           </View>
@@ -498,7 +515,7 @@ export default function HomeScreen({ navigation, route }) {
         </View>
       </View>
 
-      {/* --- EDIT MODAL (RTL Support) --- */}
+      {/* MODAL */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -511,7 +528,6 @@ export default function HomeScreen({ navigation, route }) {
         >
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{t("edit_passenger")}</Text>
-
             <Text style={styles.label}>{t("name")}</Text>
             <TextInput
               style={[
@@ -522,7 +538,6 @@ export default function HomeScreen({ navigation, route }) {
               onChangeText={setEditName}
               placeholder={t("name")}
             />
-
             <Text style={styles.label}>{t("address")}</Text>
             <TextInput
               style={[
@@ -534,7 +549,6 @@ export default function HomeScreen({ navigation, route }) {
               placeholder={t("address")}
               multiline={true}
             />
-
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={[styles.modalBtn, styles.cancelBtn]}
@@ -542,7 +556,6 @@ export default function HomeScreen({ navigation, route }) {
               >
                 <Text style={styles.cancelText}>{t("cancel")}</Text>
               </TouchableOpacity>
-
               <TouchableOpacity
                 style={[styles.modalBtn, styles.saveBtn]}
                 onPress={saveEdit}
@@ -564,8 +577,6 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === "android" ? 30 : 0,
   },
   container: { flex: 1, paddingHorizontal: 20 },
-
-  // HEADER
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -576,7 +587,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 30, fontWeight: "800", color: COLORS.textMain },
   logoutBtn: { backgroundColor: "#FEE2E2", padding: 8, borderRadius: 12 },
 
-  // INPUT
+  // Input
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -604,7 +615,7 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // ACTION BAR
+  // Action Bar
   actionBar: {
     flexDirection: "row",
     alignItems: "center",
@@ -614,7 +625,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 14, fontWeight: "700", color: COLORS.textSub },
   totalCount: { fontSize: 14, fontWeight: "700", color: COLORS.textSub },
-
   addBtn: {
     width: 30,
     height: 30,
@@ -626,8 +636,7 @@ const styles = StyleSheet.create({
     marginTop: -10,
   },
 
-  // LIST ITEMS
-  listContent: { flexGrow: 1 },
+  // List
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
@@ -651,15 +660,11 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "bold", color: COLORS.textMain },
   row: { flexDirection: "row", alignItems: "center", marginTop: 4 },
   address: { fontSize: 13, color: COLORS.textSub, marginLeft: 4, width: "90%" },
-
-  // ACTION BUTTONS (Edit/Delete)
   actionRow: { flexDirection: "row" },
   actionBtn: { padding: 8, marginLeft: 5 },
-
-  // EMPTY STATE
   emptyState: { alignItems: "center", marginTop: 50, opacity: 0.5 },
 
-  // FOOTER
+  // Footer
   footer: {
     position: "absolute",
     left: 20,
@@ -700,7 +705,7 @@ const styles = StyleSheet.create({
   },
   disabledBtn: { backgroundColor: "#CBD5E1" },
 
-  // MODAL STYLES
+  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
@@ -740,25 +745,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 10,
   },
-  modalBtn: {
-    flex: 1,
-    padding: 15,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  cancelBtn: {
-    backgroundColor: "#F3F4F6",
-    marginEnd: 10, // RTL Safe
-  },
-  saveBtn: {
-    backgroundColor: COLORS.primary,
-  },
-  cancelText: {
-    color: COLORS.textSub,
-    fontWeight: "bold",
-  },
-  saveText: {
-    color: "white",
-    fontWeight: "bold",
-  },
+  modalBtn: { flex: 1, padding: 15, borderRadius: 12, alignItems: "center" },
+  cancelBtn: { backgroundColor: "#F3F4F6", marginEnd: 10 },
+  saveBtn: { backgroundColor: COLORS.primary },
+  cancelText: { color: COLORS.textSub, fontWeight: "bold" },
+  saveText: { color: "white", fontWeight: "bold" },
 });
