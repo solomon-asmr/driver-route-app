@@ -15,6 +15,7 @@ import {
   BackHandler,
   FlatList,
   I18nManager,
+  Keyboard, // Added for UX
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -34,7 +35,7 @@ import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 /* -------------------------------------------------------------------------- */
-/* OPTIMIZED ROW                                 */
+/* OPTIMIZED ROW                                                              */
 /* -------------------------------------------------------------------------- */
 
 const PassengerRow = memo(function PassengerRow({
@@ -103,7 +104,7 @@ const PassengerRow = memo(function PassengerRow({
 });
 
 /* -------------------------------------------------------------------------- */
-/* MAIN SCREEN                                  */
+/* MAIN SCREEN                                                                */
 /* -------------------------------------------------------------------------- */
 
 export default function HomeScreen({ navigation, route }) {
@@ -115,10 +116,14 @@ export default function HomeScreen({ navigation, route }) {
 
   /* --------------------------------- State --------------------------------- */
   const [passengers, setPassengers] = useState([]);
-  const [selectedSet, setSelectedSet] = useState(new Set()); // Fast Set for performance
+  const [selectedSet, setSelectedSet] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Locations
+  const [startAddress, setStartAddress] = useState("");
   const [destinationAddress, setDestinationAddress] = useState("");
+
   const [processingRoute, setProcessingRoute] = useState(false);
 
   // Edit Modal State
@@ -184,7 +189,6 @@ export default function HomeScreen({ navigation, route }) {
     }
 
     isFetchingRef.current = true;
-    // Only show full loading spinner on FIRST load, not refreshes
     if (isRefresh) setRefreshing(true);
 
     try {
@@ -203,7 +207,6 @@ export default function HomeScreen({ navigation, route }) {
   // Fetch on Focus (Auto-update silently)
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
-      // If we already have data, don't set loading=true, just silent update
       const shouldShowSpinner = passengers.length === 0;
       if (shouldShowSpinner) setLoading(true);
       fetchPassengers();
@@ -229,7 +232,6 @@ export default function HomeScreen({ navigation, route }) {
         text: t("remove"),
         style: "destructive",
         onPress: async () => {
-          // Optimistic UI Update
           setPassengers((prev) => prev.filter((p) => p.id !== id));
           if (selectedSet.has(id)) {
             setSelectedSet((prev) => {
@@ -241,7 +243,7 @@ export default function HomeScreen({ navigation, route }) {
           try {
             await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
           } catch {
-            fetchPassengers(); // Revert on fail
+            fetchPassengers(); // Revert
           }
         },
       },
@@ -270,35 +272,62 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   /* ------------------------------- Routing --------------------------------- */
-  const proceedToMap = async (passengersToTake) => {
-    setProcessingRoute(true);
+
+  // Helper to geocode a string address
+  const geocodeAddress = async (address) => {
     try {
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
       const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-        destinationAddress
+        address
       )}&key=${apiKey}`;
 
       const response = await fetch(url);
       const data = await response.json();
-      setProcessingRoute(false);
 
       if (data.status === "OK" && data.results.length > 0) {
         const loc = data.results[0].geometry.location;
-        const destCoords = {
-          lat: loc.lat,
-          lng: loc.lng,
-          name: "Finish: " + destinationAddress,
-        };
+        return { lat: loc.lat, lng: loc.lng };
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  };
 
-        navigation.navigate("MapScreen", {
-          passengersToRoute: passengersToTake,
-          finalDestination: destCoords,
-        });
-      } else {
-        Alert.alert(t("error_title"), "Destination address not found.", [
+  const proceedToMap = async (passengersToTake) => {
+    Keyboard.dismiss(); // Clean UI
+    setProcessingRoute(true);
+
+    try {
+      // 1. Geocode Destination (Required)
+      const destCoords = await geocodeAddress(destinationAddress);
+
+      if (!destCoords) {
+        setProcessingRoute(false);
+        return Alert.alert(t("error_title"), "Destination address not found.", [
           { text: t("ok") },
         ]);
       }
+
+      // 2. Geocode Start (Optional)
+      let customStart = null;
+      if (startAddress.trim()) {
+        customStart = await geocodeAddress(startAddress);
+        if (!customStart) {
+          setProcessingRoute(false);
+          return Alert.alert(t("error_title"), "Start address not found.", [
+            { text: t("ok") },
+          ]);
+        }
+      }
+
+      // 3. Navigate
+      setProcessingRoute(false);
+      navigation.navigate("MapScreen", {
+        passengersToRoute: passengersToTake,
+        finalDestination: destCoords,
+        customStartLocation: customStart, // Pass null if empty (uses GPS)
+      });
     } catch (e) {
       setProcessingRoute(false);
       Alert.alert(t("connection_error_title"), t("connection_error_msg"), [
@@ -407,20 +436,47 @@ export default function HomeScreen({ navigation, route }) {
           </TouchableOpacity>
         </View>
 
-        {/* INPUT */}
-        <View style={styles.inputContainer}>
-          <View style={styles.pinIcon}>
-            <Ionicons name="flag" size={18} color="white" />
+        {/* INPUTS CONTAINER */}
+        <View style={styles.inputsWrapper}>
+          {/* START LOCATION (NEW) */}
+          <View style={styles.inputRow}>
+            <View
+              style={[styles.pinIcon, { backgroundColor: COLORS.secondary }]}
+            >
+              <Ionicons name="radio-button-on" size={18} color="white" />
+            </View>
+            <TextInput
+              style={[
+                styles.input,
+                { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
+              ]}
+              value={startAddress}
+              onChangeText={setStartAddress}
+              // Informative Placeholder
+              placeholder={
+                t("start location placeholder") ||
+                "Current Location (Default) or Enter Address"
+              }
+            />
           </View>
-          <TextInput
-            style={[
-              styles.input,
-              { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
-            ]}
-            value={destinationAddress}
-            onChangeText={setDestinationAddress}
-            placeholder={t("choose_dest")}
-          />
+
+          <View style={styles.inputDivider} />
+
+          {/* DESTINATION */}
+          <View style={styles.inputRow}>
+            <View style={styles.pinIcon}>
+              <Ionicons name="flag" size={18} color="white" />
+            </View>
+            <TextInput
+              style={[
+                styles.input,
+                { textAlign: isRTL || I18nManager.isRTL ? "right" : "left" },
+              ]}
+              value={destinationAddress}
+              onChangeText={setDestinationAddress}
+              placeholder={t("choose_dest")}
+            />
+          </View>
         </View>
 
         {/* ACTION BAR */}
@@ -515,7 +571,7 @@ export default function HomeScreen({ navigation, route }) {
         </View>
       </View>
 
-      {/* MODAL */}
+      {/* EDIT MODAL */}
       <Modal
         animationType="slide"
         transparent={true}
@@ -587,32 +643,41 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 30, fontWeight: "800", color: COLORS.textMain },
   logoutBtn: { backgroundColor: "#FEE2E2", padding: 8, borderRadius: 12 },
 
-  // Input
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
+  // Inputs Group
+  inputsWrapper: {
     backgroundColor: COLORS.card,
     borderRadius: 16,
-    padding: 5,
-    height: 60,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
     marginBottom: 25,
     ...SHADOWS.small,
   },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 50,
+  },
+  inputDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginLeft: 45, // Indent line to match text start
+    marginVertical: 2,
+  },
   pinIcon: {
-    width: 40,
-    height: 40,
+    width: 32,
+    height: 32,
     backgroundColor: COLORS.textMain,
-    borderRadius: 12,
+    borderRadius: 10,
     justifyContent: "center",
     alignItems: "center",
-    marginLeft: 5,
+    marginRight: 10,
   },
   input: {
     flex: 1,
     fontSize: 16,
     color: COLORS.textMain,
-    paddingHorizontal: 10,
     fontWeight: "500",
+    height: "100%",
   },
 
   // Action Bar
@@ -659,7 +724,12 @@ const styles = StyleSheet.create({
   },
   name: { fontSize: 16, fontWeight: "bold", color: COLORS.textMain },
   row: { flexDirection: "row", alignItems: "center", marginTop: 4 },
-  address: { fontSize: 13, color: COLORS.textSub, marginLeft: 4, width: "90%" },
+  address: {
+    fontSize: 13,
+    color: COLORS.textSub,
+    marginLeft: 4,
+    width: "90%",
+  },
   actionRow: { flexDirection: "row" },
   actionBtn: { padding: 8, marginLeft: 5 },
   emptyState: { alignItems: "center", marginTop: 50, opacity: 0.5 },
@@ -745,7 +815,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginTop: 10,
   },
-  modalBtn: { flex: 1, padding: 15, borderRadius: 12, alignItems: "center" },
+  modalBtn: {
+    flex: 1,
+    padding: 15,
+    borderRadius: 12,
+    alignItems: "center",
+  },
   cancelBtn: { backgroundColor: "#F3F4F6", marginEnd: 10 },
   saveBtn: { backgroundColor: COLORS.primary },
   cancelText: { color: COLORS.textSub, fontWeight: "bold" },

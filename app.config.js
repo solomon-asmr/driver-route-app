@@ -18,10 +18,10 @@ export default {
       bundleIdentifier: "com.solomon.navigo",
     },
     android: {
-      // 1. UNIQUE PACKAGE NAME (Make sure this is unique!)
+      // 1. UNIQUE PACKAGE NAME
       package: "com.solomon.navigo",
 
-      // 2. VERSION CODE (CRITICAL: Must be an integer. Increment this for every update: 1, 2, 3...)
+      // 2. VERSION CODE (Increment for updates)
       versionCode: 1,
 
       adaptiveIcon: {
@@ -29,7 +29,7 @@ export default {
         backgroundColor: "#ffffff",
       },
 
-      // 3. EXPLICIT PERMISSIONS (Helps with Google Play Verification)
+      // 3. EXPLICIT PERMISSIONS
       permissions: [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -47,6 +47,10 @@ export default {
       favicon: "./assets/logo.png",
     },
     plugins: [
+      // --- ADDED THESE TWO LINES TO FIX THE ERROR ---
+      "expo-router",
+      "expo-web-browser",
+      // ----------------------------------------------
       [
         "expo-location",
         {

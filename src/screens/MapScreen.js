@@ -3,6 +3,7 @@ import * as Location from "expo-location";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  ActivityIndicator,
   Alert,
   I18nManager,
   StatusBar,
@@ -15,14 +16,14 @@ import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { COLORS, SHADOWS } from "../theme";
 
-/* ===================== CONFIG ===================== */
+/* ===================== CONFIGURATION ===================== */
 
 const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
 const REROUTE_THRESHOLD_METERS = 50;
-const ARRIVAL_THRESHOLD_KM = 0.05; // 50 meters
-const GPS_THROTTLE_MS = 1000; // Update UI max once per second
+const ARRIVAL_THRESHOLD_KM = 0.05;
+const GPS_THROTTLE_MS = 1000;
 
-/* ===================== HELPERS ===================== */
+/* ===================== MATH HELPERS ===================== */
 
 const stripHtml = (html = "") => html.replace(/<[^>]*>?/gm, "");
 
@@ -48,7 +49,6 @@ const decodePolyline = (t, e = 5) => {
     } while (a >= 32);
     n = i & 1 ? ~(i >> 1) : i >> 1;
     l += n;
-
     h = 0;
     i = 0;
     do {
@@ -58,13 +58,13 @@ const decodePolyline = (t, e = 5) => {
     } while (a >= 32);
     o = i & 1 ? ~(i >> 1) : i >> 1;
     r += o;
-
     d.push({ latitude: l / c, longitude: r / c });
   }
   return d;
 };
 
 const haversineKm = (a, b) => {
+  if (!a || !b) return 0;
   const R = 6371;
   const dLat = (b.latitude - a.latitude) * (Math.PI / 180);
   const dLon = (b.longitude - a.longitude) * (Math.PI / 180);
@@ -76,58 +76,179 @@ const haversineKm = (a, b) => {
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
-/* ===================== OPTIMIZED MARKERS ===================== */
+// Distance from Point P to Line Segment V-W
+const distToSegment = (p, v, w) => {
+  const l2 = (w.latitude - v.latitude) ** 2 + (w.longitude - v.longitude) ** 2;
+  if (l2 === 0) return haversineKm(p, v) * 1000;
+  let t =
+    ((p.latitude - v.latitude) * (w.latitude - v.latitude) +
+      (p.longitude - v.longitude) * (w.longitude - v.longitude)) /
+    l2;
+  t = Math.max(0, Math.min(1, t));
+  const projection = {
+    latitude: v.latitude + t * (w.latitude - v.latitude),
+    longitude: v.longitude + t * (w.longitude - v.longitude),
+  };
+  return haversineKm(p, projection) * 1000;
+};
 
-// Use memo to prevent re-renders unless props change
-const StableMarker = memo(({ children, ...props }) => {
-  const [tracksViewChanges, setTracks] = useState(true);
+// Checks if user has strayed off path
+const isUserOffRoute = (userLoc, polylinePoints, threshold = 50) => {
+  if (!userLoc || !polylinePoints || polylinePoints.length < 2) return false;
+  let minDistance = Number.MAX_VALUE;
 
-  // Stop tracking view changes after 500ms to save CPU
+  // Optimization: Check every 20th point to catch bends without checking every single pixel
+  const step = Math.max(1, Math.floor(polylinePoints.length / 50));
+
+  for (let i = 0; i < polylinePoints.length - 1; i += step) {
+    const d = distToSegment(userLoc, polylinePoints[i], polylinePoints[i + 1]);
+    if (d < minDistance) minDistance = d;
+  }
+  return minDistance > threshold;
+};
+
+// --- NEW: SMOOTH DISTANCE CALCULATOR ---
+// Projects user position onto the route line for exact precision
+const calculateExactRemainingDistance = (
+  userPos,
+  polylinePoints,
+  lastIndex = 0
+) => {
+  if (!polylinePoints || polylinePoints.length < 2)
+    return { distance: 0, index: 0 };
+
+  let minDistance = Number.MAX_VALUE;
+  let closestSegmentIndex = lastIndex;
+  let projectedPoint = userPos;
+
+  // 1. Scan forward from last known index (optimization)
+  // We look ahead 50 points, or reset if we are lost
+  const searchLimit = Math.min(lastIndex + 50, polylinePoints.length - 1);
+  const startSearch = lastIndex;
+
+  for (let i = startSearch; i < searchLimit; i++) {
+    const p1 = polylinePoints[i];
+    const p2 = polylinePoints[i + 1];
+
+    // Geometric Projection Logic
+    const l2 =
+      (p2.latitude - p1.latitude) ** 2 + (p2.longitude - p1.longitude) ** 2;
+    let t = 0;
+    if (l2 !== 0) {
+      t =
+        ((userPos.latitude - p1.latitude) * (p2.latitude - p1.latitude) +
+          (userPos.longitude - p1.longitude) * (p2.longitude - p1.longitude)) /
+        l2;
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const proj = {
+      latitude: p1.latitude + t * (p2.latitude - p1.latitude),
+      longitude: p1.longitude + t * (p2.longitude - p1.longitude),
+    };
+
+    const distToProj = haversineKm(userPos, proj);
+
+    if (distToProj < minDistance) {
+      minDistance = distToProj;
+      closestSegmentIndex = i;
+      projectedPoint = proj;
+    }
+  }
+
+  // 2. Sum remaining distance
+  // Part A: Distance from User -> End of current segment
+  let remainingKm = haversineKm(
+    userPos,
+    polylinePoints[closestSegmentIndex + 1]
+  );
+
+  // Part B: Sum all subsequent segments
+  for (let i = closestSegmentIndex + 1; i < polylinePoints.length - 1; i++) {
+    remainingKm += haversineKm(polylinePoints[i], polylinePoints[i + 1]);
+  }
+
+  return { distance: remainingKm, index: closestSegmentIndex };
+};
+
+const getBearing = (start, end) => {
+  const startLat = (start.latitude * Math.PI) / 180;
+  const startLng = (start.longitude * Math.PI) / 180;
+  const endLat = (end.latitude * Math.PI) / 180;
+  const endLng = (end.longitude * Math.PI) / 180;
+  const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+  const x =
+    Math.cos(startLat) * Math.sin(endLat) -
+    Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+  const θ = Math.atan2(y, x);
+  return ((θ * 180) / Math.PI + 360) % 360;
+};
+
+/* ===================== MARKERS ===================== */
+
+const CarMarker = memo(({ coordinate }) => {
+  const [tracks, setTracks] = useState(true);
   useEffect(() => {
-    const t = setTimeout(() => setTracks(false), 500);
+    const t = setTimeout(() => setTracks(false), 1000);
     return () => clearTimeout(t);
   }, []);
 
   return (
-    <Marker {...props} tracksViewChanges={tracksViewChanges}>
-      {children}
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={100}
+      tracksViewChanges={tracks}
+    >
+      <Ionicons name="car-sport" size={40} color={COLORS.secondary} />
     </Marker>
   );
 });
 
-const CarMarker = memo(({ coordinate }) => (
-  <StableMarker
-    coordinate={coordinate}
-    anchor={{ x: 0.5, y: 0.5 }}
-    zIndex={100}
-  >
-    <Ionicons name="car-sport" size={40} color={COLORS.secondary} />
-  </StableMarker>
-));
+const StopMarker = memo(({ coordinate, index, visited }) => {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const t = setTimeout(() => setTracks(false), 500);
+    return () => clearTimeout(t);
+  }, [index, visited]);
 
-const StopMarker = memo(({ p, visited }) => (
-  <StableMarker
-    coordinate={{ latitude: p.lat, longitude: p.lng }}
-    anchor={{ x: 0.5, y: 0.5 }}
-    zIndex={50}
-  >
-    <View style={[styles.stopMarker, visited && styles.visitedMarker]}>
-      {visited ? (
-        <Ionicons name="checkmark" size={14} color="white" />
-      ) : (
-        <View style={styles.innerDot} />
-      )}
-    </View>
-  </StableMarker>
-));
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 0.5 }}
+      zIndex={50}
+      tracksViewChanges={tracks}
+    >
+      <View style={[styles.stopMarker, visited && styles.visitedMarker]}>
+        {visited ? (
+          <Ionicons name="checkmark" size={14} color="white" />
+        ) : (
+          <Text style={styles.markerNumber}>{index}</Text>
+        )}
+      </View>
+    </Marker>
+  );
+});
 
-const FlagMarker = memo(({ coordinate }) => (
-  <StableMarker coordinate={coordinate} anchor={{ x: 0.5, y: 1.0 }} zIndex={90}>
-    <View style={styles.flagMarker}>
-      <Ionicons name="flag" size={18} color="white" />
-    </View>
-  </StableMarker>
-));
+const FlagMarker = memo(({ coordinate }) => {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTimeout(() => setTracks(false), 500);
+  }, []);
+  return (
+    <Marker
+      coordinate={coordinate}
+      anchor={{ x: 0.5, y: 1 }}
+      zIndex={90}
+      tracksViewChanges={tracks}
+    >
+      <View style={styles.flagMarker}>
+        <Ionicons name="flag" size={18} color="white" />
+      </View>
+    </Marker>
+  );
+});
 
 /* ===================== MAIN SCREEN ===================== */
 
@@ -135,58 +256,84 @@ export default function MapScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
   const { t, i18n } = useTranslation();
 
-  // CHECK: Is the active language Hebrew OR Arabic?
   const isRTL = i18n.language === "he" || i18n.language === "ar";
-
-  // Instant Text Alignment
   const textAlignStyle = { textAlign: isRTL ? "right" : "left" };
 
-  const { passengersToRoute = [], finalDestination = null } =
-    route.params || {};
+  const {
+    passengersToRoute = [],
+    finalDestination = null,
+    customStartLocation = null,
+  } = route.params || {};
 
   /* ---------- STATE ---------- */
   const [driverLocation, setDriverLocation] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
+
+  // STATE FOR OPTIMIZED ORDER
+  const [orderedPassengers, setOrderedPassengers] = useState(passengersToRoute);
+
   const [remainingKm, setRemainingKm] = useState(0);
   const [remainingMin, setRemainingMin] = useState(0);
   const [nextInstruction, setNextInstruction] = useState(null);
   const [distToTurn, setDistToTurn] = useState(0);
   const [visitedIds, setVisitedIds] = useState(new Set());
   const [isRerouting, setIsRerouting] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+
+  const [isMapReady, setIsMapReady] = useState(false);
 
   /* ---------- REFS ---------- */
   const mapRef = useRef(null);
-  const routeCoordsRef = useRef([]); // Keep ref for fast access in loop
+  const routeCoordsRef = useRef([]);
   const routeStepsRef = useRef([]);
   const stepIndexRef = useRef(0);
   const visitedRef = useRef(new Set());
-  const avgSpeedRef = useRef(0.5); // Default ~30km/h
+  const avgSpeedRef = useRef(0.5); // Km per minute
   const lastGpsRef = useRef(0);
   const arrivedRef = useRef(false);
+  const initialRouteFetched = useRef(false);
 
-  /* ===================== INITIAL PERMISSIONS ===================== */
+  // Optimization Ref: Track where we are on the polyline so we don't scan from the start every time
+  const currentPolylineIndexRef = useRef(0);
+
+  /* ===================== INITIALIZATION ===================== */
   useEffect(() => {
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         Alert.alert(t("error_title"), "GPS is required.", [{ text: t("ok") }]);
+        setInitialLoading(false);
         return;
       }
 
-      const pos = await Location.getCurrentPositionAsync({});
-      const initialPos = {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-      };
-      setDriverLocation(initialPos);
+      let startPos = null;
+      if (customStartLocation) {
+        startPos = {
+          latitude: customStartLocation.lat || customStartLocation.latitude,
+          longitude: customStartLocation.lng || customStartLocation.longitude,
+        };
+      } else {
+        const pos = await Location.getCurrentPositionAsync({});
+        startPos = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        };
+      }
+
+      setDriverLocation(startPos);
+
+      if (!initialRouteFetched.current && startPos) {
+        fetchRoute(startPos);
+      }
     })();
   }, []);
 
-  /* ===================== ROUTING LOGIC ===================== */
+  /* ===================== ROUTE FETCH ===================== */
   const fetchRoute = useCallback(
     async (origin) => {
       if (isRerouting) return;
       setIsRerouting(true);
+      initialRouteFetched.current = true;
 
       try {
         const activeStops = passengersToRoute.filter(
@@ -219,12 +366,24 @@ export default function MapScreen({ navigation, route }) {
         }
 
         const routeData = json.routes[0];
+
+        // 3. APPLY OPTIMIZED ORDER
+        const orderArray = routeData.waypoint_order || [];
+
+        if (orderArray.length > 0) {
+          const reordered = orderArray.map((index) => activeStops[index]);
+          setOrderedPassengers(reordered);
+        } else {
+          setOrderedPassengers(activeStops);
+        }
+
+        // 4. Decode Route
         const points = decodePolyline(routeData.overview_polyline.points);
-
-        // Update Refs
         routeCoordsRef.current = points;
-        setRouteCoords(points); // Trigger re-render for Polyline
+        setRouteCoords(points);
+        currentPolylineIndexRef.current = 0; // Reset index on new route
 
+        // 5. Steps & Stats
         let allSteps = [];
         routeData.legs.forEach((leg) => {
           allSteps = [...allSteps, ...leg.steps];
@@ -232,7 +391,6 @@ export default function MapScreen({ navigation, route }) {
         routeStepsRef.current = allSteps;
         stepIndexRef.current = 0;
 
-        // Calc Stats
         let totalMeters = 0;
         let totalSecs = 0;
         routeData.legs.forEach((leg) => {
@@ -241,42 +399,56 @@ export default function MapScreen({ navigation, route }) {
         });
 
         if (totalSecs > 0) {
-          avgSpeedRef.current = totalMeters / 1000 / (totalSecs / 60);
+          avgSpeedRef.current = totalMeters / 1000 / (totalSecs / 60); // km per min
         }
 
         setRemainingKm(totalMeters / 1000);
         setRemainingMin(totalSecs / 60);
-
-        // Fit Map
-        mapRef.current?.fitToCoordinates(points, {
-          edgePadding: { top: 120, bottom: 260, left: 40, right: 40 },
-          animated: true,
-        });
       } catch (err) {
         console.error("Route Fetch Error", err);
+        Alert.alert(t("error_title"), t("server_error"), [{ text: t("ok") }]);
       } finally {
         setIsRerouting(false);
+        setInitialLoading(false);
       }
     },
     [passengersToRoute, finalDestination, i18n.language, isRerouting]
   );
 
-  /* ===================== TRIGGER INITIAL ROUTE ===================== */
+  /* ===================== CAMERA AUTO-ZOOM ===================== */
   useEffect(() => {
-    if (driverLocation && routeCoordsRef.current.length === 0) {
-      fetchRoute(driverLocation);
+    if (
+      isMapReady &&
+      routeCoords.length > 1 &&
+      driverLocation &&
+      mapRef.current
+    ) {
+      const initialBearing = getBearing(
+        driverLocation,
+        routeCoords[1] || routeCoords[0]
+      );
+      mapRef.current.animateCamera(
+        {
+          center: driverLocation,
+          heading: initialBearing,
+          pitch: 50,
+          zoom: 18,
+        },
+        { duration: 1500 }
+      );
     }
-  }, [driverLocation, fetchRoute]);
+  }, [isMapReady, routeCoords, driverLocation]);
 
   /* ===================== GPS TRACKING LOOP ===================== */
   useEffect(() => {
+    if (customStartLocation) return;
+
     let sub;
     (async () => {
       sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.High, distanceInterval: 5 },
         (loc) => {
           const now = Date.now();
-          // Throttle updates to avoid state thrashing
           if (now - lastGpsRef.current < GPS_THROTTLE_MS) return;
           lastGpsRef.current = now;
 
@@ -288,20 +460,15 @@ export default function MapScreen({ navigation, route }) {
 
           setDriverLocation(pos);
 
-          // Animate Camera (Smooth Driver View)
-          if (mapRef.current && heading >= 0 && speed > 0.5) {
+          // Animate Camera
+          if (mapRef.current && isMapReady && heading >= 0 && speed > 0.5) {
             mapRef.current.animateCamera(
-              {
-                center: pos,
-                heading: heading,
-                pitch: 50,
-                zoom: 18,
-              },
+              { center: pos, heading: heading, pitch: 50, zoom: 18 },
               { duration: 1000 }
             );
           }
 
-          // 1. Navigation Instructions
+          /* --- LOGIC 1: INSTRUCTIONS --- */
           const steps = routeStepsRef.current;
           let idx = stepIndexRef.current;
 
@@ -313,15 +480,12 @@ export default function MapScreen({ navigation, route }) {
             });
             setDistToTurn((d * 1000).toFixed(0));
 
-            // Advance step if close
             if (d < 0.02 && idx + 1 < steps.length) {
               stepIndexRef.current++;
               idx++;
             }
 
-            // Show instruction
             if (steps[idx]) {
-              // Look ahead 1 step for "Next Turn" usually, or current if close
               const instr =
                 steps[Math.min(idx + 1, steps.length - 1)]?.html_instructions ||
                 "";
@@ -329,33 +493,49 @@ export default function MapScreen({ navigation, route }) {
             }
           }
 
-          // 2. Remaining Distance/Time (Pure Math, no API call)
-          if (routeCoordsRef.current.length > 0) {
-            // Find closest point on polyline roughly
-            // (Simplified: Just subtract distance travelled based on speed is complex,
-            //  so we stick to haversine from current pos to end of polyline roughly)
-            //  For high perf, we trust the 'remainingKm' decremented by distance moved?
-            //  Better: Re-calculate from array.
-            // Simple fallback: Decrement based on moved distance? No, drift occurs.
-            // We will skip heavy array reduction every second.
-            // Just let the stats update on Reroute or significant event.
-            // OR: A quick hack: direct distance to destination * 1.3 (road factor)
+          /* --- LOGIC 2: OFF-ROUTE --- */
+          if (routeCoordsRef.current.length > 0 && !isRerouting) {
+            const isOff = isUserOffRoute(
+              pos,
+              routeCoordsRef.current,
+              REROUTE_THRESHOLD_METERS
+            );
+            if (isOff) fetchRoute(pos);
           }
 
-          // 3. Check Stop Arrivals
+          /* --- LOGIC 3: SMOOTH REMAINING DISTANCE/TIME --- */
+          if (routeCoordsRef.current.length > 0) {
+            // Use the new SMOOTH calculator
+            const { distance, index } = calculateExactRemainingDistance(
+              pos,
+              routeCoordsRef.current,
+              currentPolylineIndexRef.current
+            );
+
+            // Update the reference index so we don't scan the whole array next time
+            currentPolylineIndexRef.current = index;
+
+            setRemainingKm(distance);
+
+            // Update Time proportionally based on Average Speed
+            if (avgSpeedRef.current > 0) {
+              setRemainingMin(distance / avgSpeedRef.current);
+            }
+          }
+
+          /* --- LOGIC 4: CHECK ARRIVALS --- */
           passengersToRoute.forEach((p) => {
             if (!visitedRef.current.has(p.id)) {
               const d = haversineKm(pos, { latitude: p.lat, longitude: p.lng });
-              if (d < 0.05) {
-                // 50 meters
+              if (d < ARRIVAL_THRESHOLD_KM) {
                 visitedRef.current.add(p.id);
                 setVisitedIds(new Set(visitedRef.current));
-                fetchRoute(pos); // Recalculate removing this stop
+                fetchRoute(pos); // Recalculate route to next stop
               }
             }
           });
 
-          // 4. Check Final Destination
+          /* --- LOGIC 5: FINAL DESTINATION --- */
           if (finalDestination && !arrivedRef.current) {
             const d = haversineKm(pos, {
               latitude: finalDestination.lat,
@@ -377,7 +557,7 @@ export default function MapScreen({ navigation, route }) {
     })();
 
     return () => sub?.remove();
-  }, [fetchRoute]);
+  }, [fetchRoute, isRerouting, customStartLocation, isMapReady]);
 
   /* ===================== RENDER ===================== */
 
@@ -385,7 +565,7 @@ export default function MapScreen({ navigation, route }) {
   const mapPadding = {
     top: headerHeight + 20,
     right: 10,
-    bottom: 240, // Space for bottom sheet
+    bottom: 240,
     left: 10,
   };
 
@@ -412,7 +592,6 @@ export default function MapScreen({ navigation, route }) {
             name="arrow-back"
             size={24}
             color={COLORS.textMain}
-            // Instant RTL Flip
             style={{
               transform: [{ scaleX: isRTL || I18nManager.isRTL ? -1 : 1 }],
             }}
@@ -421,14 +600,23 @@ export default function MapScreen({ navigation, route }) {
         <Text style={styles.headerTitle}>{t("map_active_route")}</Text>
       </View>
 
+      {/* LOADING */}
+      {initialLoading && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={{ marginTop: 10, color: COLORS.textSub }}>
+            {t("map_recalculating")}
+          </Text>
+        </View>
+      )}
+
       {/* NAV BANNER */}
-      {nextInstruction && (
+      {!initialLoading && nextInstruction && (
         <View style={[styles.navBanner, { top: headerHeight }]}>
           <Ionicons
             name="return-up-forward"
             size={32}
             color="white"
-            // Flip nav arrow icon if RTL
             style={{ transform: [{ scaleX: isRTL ? -1 : 1 }] }}
           />
           <View style={{ marginStart: 15, flex: 1 }}>
@@ -452,16 +640,13 @@ export default function MapScreen({ navigation, route }) {
         ref={mapRef}
         style={styles.map}
         provider={PROVIDER_GOOGLE}
-        showsUserLocation={false} // We draw our own car
+        showsUserLocation={false}
         showsCompass={true}
         mapPadding={mapPadding}
+        onMapReady={() => setIsMapReady(true)}
         initialRegion={
           driverLocation
-            ? {
-                ...driverLocation,
-                latitudeDelta: 0.05,
-                longitudeDelta: 0.05,
-              }
+            ? { ...driverLocation, latitudeDelta: 0.05, longitudeDelta: 0.05 }
             : undefined
         }
       >
@@ -476,8 +661,14 @@ export default function MapScreen({ navigation, route }) {
 
         {driverLocation && <CarMarker coordinate={driverLocation} />}
 
-        {passengersToRoute.map((p) => (
-          <StopMarker key={p.id} p={p} visited={visitedIds.has(p.id)} />
+        {/* --- RENDER OPTIMIZED PASSENGERS WITH NUMBERS --- */}
+        {orderedPassengers.map((p, index) => (
+          <StopMarker
+            key={p.id}
+            coordinate={{ latitude: p.lat, longitude: p.lng }}
+            index={index + 1}
+            visited={visitedIds.has(p.id)}
+          />
         ))}
 
         {finalDestination && (
@@ -490,7 +681,7 @@ export default function MapScreen({ navigation, route }) {
         )}
       </MapView>
 
-      {/* DASHBOARD (Restored!) */}
+      {/* DASHBOARD */}
       <View style={[styles.bottomSheet, { paddingBottom: insets.bottom + 20 }]}>
         <View style={styles.tripInfo}>
           <View style={styles.statItem}>
@@ -503,7 +694,7 @@ export default function MapScreen({ navigation, route }) {
             <Text style={styles.tripLabel}>{t("map_eta")}</Text>
           </View>
         </View>
-        {isRerouting && (
+        {isRerouting && !initialLoading && (
           <Text style={styles.reroutingText}>{t("map_recalculating")}</Text>
         )}
       </View>
@@ -542,6 +733,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  loadingOverlay: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 2000,
+  },
+
   navBanner: {
     position: "absolute",
     left: 10,
@@ -561,19 +764,29 @@ const styles = StyleSheet.create({
   navDistText: { color: "#a5d6a7", fontWeight: "bold" },
   navInstructionText: { color: "white", fontSize: 18, fontWeight: "bold" },
 
-  // Markers
   stopMarker: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: COLORS.danger,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
     borderColor: "white",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 1 },
   },
   visitedMarker: { backgroundColor: COLORS.secondary },
-  innerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "white" },
+
+  markerNumber: {
+    color: "white",
+    fontWeight: "bold",
+    fontSize: 12,
+    textAlign: "center",
+  },
+
   flagMarker: {
     width: 34,
     height: 34,
@@ -585,7 +798,6 @@ const styles = StyleSheet.create({
     borderColor: "white",
   },
 
-  // Bottom Sheet
   bottomSheet: {
     position: "absolute",
     bottom: 0,
