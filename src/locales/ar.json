@@ -81,5 +81,29 @@
   "map_turn_now": "انعطف الآن",
   "map_in_meters": "بعد {{distance}} م",
   "alert_no_passengers_title": "لم يتم تحديد ركاب",
-  "alert_no_passengers_msg": "هل تريد القيادة مباشرة إلى الوجهة؟"
+  "alert_no_passengers_msg": "هل تريد القيادة مباشرة إلى الوجهة؟",
+
+  "forgot_password": "نسيت كلمة المرور؟",
+  "enter_email_for_reset": "يرجى إدخال بريدك الإلكتروني لإعادة تعيين كلمة المرور.",
+  "success_title": "نجاح",
+  "password_reset_email_sent": "تحقق من بريدك الإلكتروني للحصول على رابط إعادة التعيين.",
+  "verification_email_sent": "تم إنشاء الحساب! تحقق من بريدك الإلكتروني لتأكيده.",
+  "start_location_placeholder": "الموقع الحالي أو العنوان",
+  "reset_password_title": "إعادة تعيين كلمة المرور",
+  "enter_new_password_below": "أدخل كلمة المرور الجديدة أدناه",
+  "new_password_placeholder": "كلمة المرور الجديدة",
+  "update_password": "تحديث كلمة المرور",
+  "password_too_short": "يجب أن تكون كلمة المرور 6 أحرف على الأقل",
+  "password_updated_successfully": "تم تحديث كلمة المرور بنجاح!",
+
+  "reset_subtitle_email": "أدخل بريدك الإلكتروني لاستلام رمز التحقق.",
+  "send_code_btn": "إرسال الرمز",
+  "check_email_code_msg": "تحقق من بريدك الإلكتروني للحصول على رمز التحقق المكون من 6 أرقام!",
+  "reset_subtitle_otp": "أدخل الرمز وكلمة المرور الجديدة.",
+  "otp_placeholder": "رمز من 6 أرقام",
+  "confirm_password_placeholder": "تأكيد كلمة المرور الجديدة",
+  "wrong_email_link": "بريد إلكتروني خاطئ؟ حاول مرة أخرى.",
+  "fill_all_fields": "يرجى ملء جميع الحقول.",
+  "passwords_no_match": "كلمتا المرور غير متطابقتين.",
+  "reset_complete_msg": "تم تحديث كلمة المرور بنجاح! أنت الآن مسجل الدخول."
 }

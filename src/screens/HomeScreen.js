@@ -15,7 +15,7 @@ import {
   BackHandler,
   FlatList,
   I18nManager,
-  Keyboard, // Added for UX
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -35,7 +35,7 @@ import { supabase } from "../supabaseClient";
 import { COLORS, SHADOWS } from "../theme";
 
 /* -------------------------------------------------------------------------- */
-/* OPTIMIZED ROW                                                              */
+/* PASSENGER ROW COMPONENT                                                    */
 /* -------------------------------------------------------------------------- */
 
 const PassengerRow = memo(function PassengerRow({
@@ -151,7 +151,6 @@ export default function HomeScreen({ navigation, route }) {
 
   /* ----------------------------- Initialization ---------------------------- */
   useEffect(() => {
-    // Check if we have incoming params from Import Screen
     if (route.params?.importedDestination)
       setDestinationAddress(route.params.importedDestination);
 
@@ -161,13 +160,24 @@ export default function HomeScreen({ navigation, route }) {
         route.params.importedIds.forEach((id) => next.add(id));
         return next;
       });
-      // Clear params to avoid loop
       navigation.setParams({ importedDestination: null, importedIds: null });
     }
   }, [route.params]);
 
+  // --- FAST USER CHECK (Session first) ---
   const getUserId = async () => {
     if (userIdRef.current) return userIdRef.current;
+
+    // 1. Try local session first (Instant)
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session?.user) {
+      userIdRef.current = session.user.id;
+      return session.user.id;
+    }
+
+    // 2. Fallback to network call
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -182,19 +192,25 @@ export default function HomeScreen({ navigation, route }) {
   const fetchPassengers = useCallback(async (isRefresh = false) => {
     if (isFetchingRef.current) return;
 
+    if (isRefresh) setRefreshing(true);
+    else if (passengers.length === 0) setLoading(true);
+
     const uid = await getUserId();
     if (!uid) {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
     isFetchingRef.current = true;
-    if (isRefresh) setRefreshing(true);
 
     try {
+      // REMOVED TIMEOUT: App will wait until server wakes up
       const res = await fetch(`${API_URL}/passengers?userId=${uid}`);
       const data = await res.json();
-      if (res.ok) setPassengers(data);
+      if (res.ok) {
+        setPassengers(data);
+      }
     } catch (e) {
       console.error("Fetch failed", e);
     } finally {
@@ -204,15 +220,13 @@ export default function HomeScreen({ navigation, route }) {
     }
   }, []);
 
-  // Fetch on Focus (Auto-update silently)
+  // Fetch on Focus
   useEffect(() => {
     const unsubscribe = navigation.addListener("focus", () => {
-      const shouldShowSpinner = passengers.length === 0;
-      if (shouldShowSpinner) setLoading(true);
       fetchPassengers();
     });
     return unsubscribe;
-  }, [navigation, fetchPassengers, passengers.length]);
+  }, [navigation, fetchPassengers]);
 
   /* ------------------------------ Selection -------------------------------- */
   const togglePassenger = useCallback((id) => {
@@ -243,7 +257,7 @@ export default function HomeScreen({ navigation, route }) {
           try {
             await fetch(`${API_URL}/passengers/${id}`, { method: "DELETE" });
           } catch {
-            fetchPassengers(); // Revert
+            fetchPassengers();
           }
         },
       },
@@ -272,8 +286,6 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   /* ------------------------------- Routing --------------------------------- */
-
-  // Helper to geocode a string address
   const geocodeAddress = async (address) => {
     try {
       const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
@@ -295,11 +307,10 @@ export default function HomeScreen({ navigation, route }) {
   };
 
   const proceedToMap = async (passengersToTake) => {
-    Keyboard.dismiss(); // Clean UI
+    Keyboard.dismiss();
     setProcessingRoute(true);
 
     try {
-      // 1. Geocode Destination (Required)
       const destCoords = await geocodeAddress(destinationAddress);
 
       if (!destCoords) {
@@ -309,7 +320,6 @@ export default function HomeScreen({ navigation, route }) {
         ]);
       }
 
-      // 2. Geocode Start (Optional)
       let customStart = null;
       if (startAddress.trim()) {
         customStart = await geocodeAddress(startAddress);
@@ -321,12 +331,11 @@ export default function HomeScreen({ navigation, route }) {
         }
       }
 
-      // 3. Navigate
       setProcessingRoute(false);
       navigation.navigate("MapScreen", {
         passengersToRoute: passengersToTake,
         finalDestination: destCoords,
-        customStartLocation: customStart, // Pass null if empty (uses GPS)
+        customStartLocation: customStart,
       });
     } catch (e) {
       setProcessingRoute(false);
@@ -368,7 +377,6 @@ export default function HomeScreen({ navigation, route }) {
     }
     setEditModalVisible(false);
 
-    // Optimistic Update
     setPassengers((prev) =>
       prev.map((p) =>
         p.id === editId ? { ...p, name: editName, address: editAddress } : p
@@ -390,7 +398,7 @@ export default function HomeScreen({ navigation, route }) {
       });
     } catch (e) {
       console.error("Save edit failed", e);
-      fetchPassengers(); // Revert
+      fetchPassengers();
     }
   };
 
@@ -438,7 +446,6 @@ export default function HomeScreen({ navigation, route }) {
 
         {/* INPUTS CONTAINER */}
         <View style={styles.inputsWrapper}>
-          {/* START LOCATION (NEW) */}
           <View style={styles.inputRow}>
             <View
               style={[styles.pinIcon, { backgroundColor: COLORS.secondary }]}
@@ -452,9 +459,8 @@ export default function HomeScreen({ navigation, route }) {
               ]}
               value={startAddress}
               onChangeText={setStartAddress}
-              // Informative Placeholder
               placeholder={
-                t("start location placeholder") ||
+                t("start_location_placeholder") ||
                 "Current Location (Default) or Enter Address"
               }
             />
@@ -462,7 +468,6 @@ export default function HomeScreen({ navigation, route }) {
 
           <View style={styles.inputDivider} />
 
-          {/* DESTINATION */}
           <View style={styles.inputRow}>
             <View style={styles.pinIcon}>
               <Ionicons name="flag" size={18} color="white" />

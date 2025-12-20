@@ -82,5 +82,29 @@
   "map_turn_now": "פנה כעת",
   "map_in_meters": "בעוד {{distance}} מ׳",
   "alert_no_passengers_title": "לא נבחרו נוסעים",
-  "alert_no_passengers_msg": "האם לנסוע ישירות ליעד?"
+  "alert_no_passengers_msg": "האם לנסוע ישירות ליעד?",
+
+  "forgot_password": "?שכחת סיסמה",
+  "enter_email_for_reset": "נא להזין את האימייל לאיפוס הסיסמה.",
+  "success_title": "הצלחה",
+  "password_reset_email_sent": "בדוק את האימייל שלך לקישור לאיפוס.",
+  "verification_email_sent": "החשבון נוצר! יש לבדוק את האימייל לאימות.",
+  "start_location_placeholder": "מיקום נוכחי או כתובת",
+  "reset_password_title": "איפוס סיסמה",
+  "enter_new_password_below": "הכנס את הסיסמה החדשה שלך למטה",
+  "new_password_placeholder": "סיסמה חדשה",
+  "update_password": "עדכן סיסמה",
+  "password_too_short": "הסיסמה חייבת להכיל לפחות 6 תווים",
+  "password_updated_successfully": "הסיסמה עודכנה בהצלחה!",
+
+  "reset_subtitle_email": "הזן את האימייל שלך לקבלת קוד אימות.",
+  "send_code_btn": "שלח קוד",
+  "check_email_code_msg": "בדוק את האימייל לקבלת קוד האימות בן 6 הספרות!",
+  "reset_subtitle_otp": "הזן את הקוד ואת הסיסמה החדשה.",
+  "otp_placeholder": "קוד בן 6 ספרות",
+  "confirm_password_placeholder": "אישור סיסמה חדשה",
+  "wrong_email_link": "אימייל שגוי? נסה שוב.",
+  "fill_all_fields": "נא למלא את כל השדות.",
+  "passwords_no_match": "הסיסמאות אינן תואמות.",
+  "reset_complete_msg": "הסיסמה עודכנה בהצלחה! אתה מחובר כעת."
 }

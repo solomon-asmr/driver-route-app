@@ -4,14 +4,19 @@ import { initReactI18next } from "react-i18next";
 import { I18nManager } from "react-native";
 
 // Import translations
-import ar from "./locales/ar.json"; // <--- 1. Import Arabic
+import ar from "./locales/ar.json";
 import en from "./locales/en.json";
 import he from "./locales/he.json";
+
+import am from "./locales/am.json";
+import ru from "./locales/ru.json";
 
 const resources = {
   en: { translation: en },
   he: { translation: he },
-  ar: { translation: ar }, // <--- 2. Register Arabic
+  ar: { translation: ar },
+  ru: { translation: ru },
+  am: { translation: am },
 };
 
 // 3. Get device locale

@@ -4,6 +4,7 @@ export default {
   expo: {
     name: "NaviGo Driver",
     slug: "navigo",
+    scheme: "com.solomon.navigo",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/logo.png",
@@ -47,10 +48,8 @@ export default {
       favicon: "./assets/logo.png",
     },
     plugins: [
-      // --- ADDED THESE TWO LINES TO FIX THE ERROR ---
-      "expo-router",
+      // "expo-router", <--- REMOVED THIS LINE TO FIX CRASH
       "expo-web-browser",
-      // ----------------------------------------------
       [
         "expo-location",
         {
@@ -63,7 +62,7 @@ export default {
     ],
     extra: {
       eas: {
-        projectId: "198a4c49-6175-45ea-82ef-8d52714e813f",
+        projectId: "32835c17-1854-4ebf-b18b-a1df4c0fbc57",
       },
     },
   },

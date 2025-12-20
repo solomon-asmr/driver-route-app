@@ -20,7 +20,7 @@ import { COLORS, SHADOWS } from "../theme";
 
 export default function SignupScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { t, i18n } = useTranslation(); // <--- Get i18n instance
+  const { t, i18n } = useTranslation();
 
   // CHECK: Is the active language Hebrew OR Arabic?
   const isRTL = i18n.language === "he" || i18n.language === "ar";
@@ -34,7 +34,6 @@ export default function SignupScreen({ navigation }) {
 
   const handleSignUp = async () => {
     if (!email || !password) {
-      // FIX: Localized OK button
       Alert.alert(t("missing_info"), t("enter_email_password"), [
         { text: t("ok") },
       ]);
@@ -42,19 +41,29 @@ export default function SignupScreen({ navigation }) {
     }
 
     setLoading(true);
+
+    // --- UPDATED SIGN UP LOGIC FOR APP DEEP LINKING ---
     const { error } = await supabase.auth.signUp({
       email: email,
       password: password,
+      options: {
+        // This tells Supabase: "When they click the email link, open THIS app, not a webpage."
+        emailRedirectTo: "com.solomon.navigo://signup-callback",
+      },
     });
 
     if (error) {
-      // FIX: Localized OK button
       Alert.alert(t("signup_failed"), error.message, [{ text: t("ok") }]);
     } else {
-      // FIX: Localized OK button
-      Alert.alert(t("success"), t("account_created"), [
-        { text: t("ok"), onPress: () => navigation.replace("Login") },
-      ]);
+      Alert.alert(
+        t("success"),
+        t("verification_email_sent") ||
+          "Account created! Check your email to verify.",
+        [
+          // We send them to Login, but if they click the email link, the app will auto-open to Home.
+          { text: t("ok"), onPress: () => navigation.replace("Login") },
+        ]
+      );
     }
     setLoading(false);
   };

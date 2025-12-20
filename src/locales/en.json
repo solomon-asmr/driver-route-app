@@ -81,5 +81,29 @@
   "map_turn_now": "Turn Now",
   "map_in_meters": "In {{distance}}m",
   "alert_no_passengers_title": "No Passengers Selected",
-  "alert_no_passengers_msg": "Drive directly to destination?"
+  "alert_no_passengers_msg": "Drive directly to destination?",
+
+  "forgot_password": "Forgot Password?",
+  "enter_email_for_reset": "Please enter your email to reset your password.",
+  "success_title": "Success",
+  "password_reset_email_sent": "Check your email for the reset link.",
+  "start_location_placeholder": "Current Location or Address",
+  "verification_email_sent": "Account created! Check your email to verify.",
+  "reset_password_title": "Reset Password",
+  "enter_new_password_below": "Enter your new password below",
+  "new_password_placeholder": "New Password",
+  "update_password": "Update Password",
+  "password_too_short": "Password must be at least 6 characters",
+  "password_updated_successfully": "Password updated successfully!",
+
+  "reset_subtitle_email": "Enter your email to receive a verification code.",
+  "send_code_btn": "Send Code",
+  "check_email_code_msg": "Check your email for the 6-digit verification code!",
+  "reset_subtitle_otp": "Enter the code and your new password.",
+  "otp_placeholder": "6-Digit Code",
+  "confirm_password_placeholder": "Confirm New Password",
+  "wrong_email_link": "Wrong email? Try again.",
+  "fill_all_fields": "Please fill in all fields.",
+  "passwords_no_match": "Passwords do not match.",
+  "reset_complete_msg": "Your password has been updated! You are now logged in."
 }

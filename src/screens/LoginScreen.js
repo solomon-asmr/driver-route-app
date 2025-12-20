@@ -37,7 +37,6 @@ export default function LoginScreen({ navigation }) {
   const handleLogin = async () => {
     // 1. CLIENT-SIDE VALIDATION
     if (!email || !password) {
-      // FIX: Localized Alert & Button
       Alert.alert(t("missing_info"), t("enter_email_password"), [
         { text: t("ok") },
       ]);
@@ -51,7 +50,6 @@ export default function LoginScreen({ navigation }) {
     });
 
     if (error) {
-      // FIX: Localized OK Button for server errors
       Alert.alert(t("login_failed"), error.message, [{ text: t("ok") }]);
       setLoading(false);
     } else {
@@ -149,6 +147,17 @@ export default function LoginScreen({ navigation }) {
               />
             </View>
 
+            {/* --- FORGOT PASSWORD LINK --- */}
+            <TouchableOpacity
+              style={styles.forgotPassContainer}
+              // UPDATED: Now navigates directly to the Reset Screen
+              onPress={() => navigation.navigate("ResetPassword")}
+            >
+              <Text style={styles.forgotPassText}>
+                {t("forgot_password") || "Forgot Password?"}
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[styles.loginBtn, loading && styles.disabledBtn]}
               onPress={handleLogin}
@@ -235,6 +244,18 @@ const styles = StyleSheet.create({
     ...SHADOWS.small,
   },
   input: { flex: 1, fontSize: 16, color: COLORS.textMain, height: "100%" },
+
+  // --- FORGOT PASSWORD STYLES ---
+  forgotPassContainer: {
+    alignSelf: "flex-end",
+    marginBottom: 20,
+    paddingVertical: 5,
+  },
+  forgotPassText: {
+    color: COLORS.primary,
+    fontWeight: "600",
+    fontSize: 14,
+  },
 
   loginBtn: {
     backgroundColor: COLORS.primary,
