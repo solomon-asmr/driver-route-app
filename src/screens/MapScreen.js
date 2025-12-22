@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   I18nManager,
   StatusBar,
   StyleSheet,
@@ -22,6 +23,7 @@ const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_KEY;
 const REROUTE_THRESHOLD_METERS = 50;
 const ARRIVAL_THRESHOLD_KM = 0.05;
 const GPS_THROTTLE_MS = 1000;
+const SCREEN_HEIGHT = Dimensions.get("window").height;
 
 /* ===================== MATH HELPERS ===================== */
 
@@ -76,7 +78,6 @@ const haversineKm = (a, b) => {
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 };
 
-// Distance from Point P to Line Segment V-W
 const distToSegment = (p, v, w) => {
   const l2 = (w.latitude - v.latitude) ** 2 + (w.longitude - v.longitude) ** 2;
   if (l2 === 0) return haversineKm(p, v) * 1000;
@@ -92,12 +93,9 @@ const distToSegment = (p, v, w) => {
   return haversineKm(p, projection) * 1000;
 };
 
-// Checks if user has strayed off path
 const isUserOffRoute = (userLoc, polylinePoints, threshold = 50) => {
   if (!userLoc || !polylinePoints || polylinePoints.length < 2) return false;
   let minDistance = Number.MAX_VALUE;
-
-  // Optimization: Check every 20th point to catch bends without checking every single pixel
   const step = Math.max(1, Math.floor(polylinePoints.length / 50));
 
   for (let i = 0; i < polylinePoints.length - 1; i += step) {
@@ -107,8 +105,6 @@ const isUserOffRoute = (userLoc, polylinePoints, threshold = 50) => {
   return minDistance > threshold;
 };
 
-// --- NEW: SMOOTH DISTANCE CALCULATOR ---
-// Projects user position onto the route line for exact precision
 const calculateExactRemainingDistance = (
   userPos,
   polylinePoints,
@@ -119,10 +115,7 @@ const calculateExactRemainingDistance = (
 
   let minDistance = Number.MAX_VALUE;
   let closestSegmentIndex = lastIndex;
-  let projectedPoint = userPos;
 
-  // 1. Scan forward from last known index (optimization)
-  // We look ahead 50 points, or reset if we are lost
   const searchLimit = Math.min(lastIndex + 50, polylinePoints.length - 1);
   const startSearch = lastIndex;
 
@@ -130,7 +123,6 @@ const calculateExactRemainingDistance = (
     const p1 = polylinePoints[i];
     const p2 = polylinePoints[i + 1];
 
-    // Geometric Projection Logic
     const l2 =
       (p2.latitude - p1.latitude) ** 2 + (p2.longitude - p1.longitude) ** 2;
     let t = 0;
@@ -152,18 +144,14 @@ const calculateExactRemainingDistance = (
     if (distToProj < minDistance) {
       minDistance = distToProj;
       closestSegmentIndex = i;
-      projectedPoint = proj;
     }
   }
 
-  // 2. Sum remaining distance
-  // Part A: Distance from User -> End of current segment
   let remainingKm = haversineKm(
     userPos,
     polylinePoints[closestSegmentIndex + 1]
   );
 
-  // Part B: Sum all subsequent segments
   for (let i = closestSegmentIndex + 1; i < polylinePoints.length - 1; i++) {
     remainingKm += haversineKm(polylinePoints[i], polylinePoints[i + 1]);
   }
@@ -187,6 +175,7 @@ const getBearing = (start, end) => {
 /* ===================== MARKERS ===================== */
 
 const CarMarker = memo(({ coordinate }) => {
+  // Hack to force refresh on Android sometimes
   const [tracks, setTracks] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => setTracks(false), 1000);
@@ -268,8 +257,6 @@ export default function MapScreen({ navigation, route }) {
   /* ---------- STATE ---------- */
   const [driverLocation, setDriverLocation] = useState(null);
   const [routeCoords, setRouteCoords] = useState([]);
-
-  // STATE FOR OPTIMIZED ORDER
   const [orderedPassengers, setOrderedPassengers] = useState(passengersToRoute);
 
   const [remainingKm, setRemainingKm] = useState(0);
@@ -292,9 +279,10 @@ export default function MapScreen({ navigation, route }) {
   const lastGpsRef = useRef(0);
   const arrivedRef = useRef(false);
   const initialRouteFetched = useRef(false);
-
-  // Optimization Ref: Track where we are on the polyline so we don't scan from the start every time
   const currentPolylineIndexRef = useRef(0);
+
+  // Ref to track last camera heading to prevent jitter
+  const lastHeadingRef = useRef(0);
 
   /* ===================== INITIALIZATION ===================== */
   useEffect(() => {
@@ -366,8 +354,6 @@ export default function MapScreen({ navigation, route }) {
         }
 
         const routeData = json.routes[0];
-
-        // 3. APPLY OPTIMIZED ORDER
         const orderArray = routeData.waypoint_order || [];
 
         if (orderArray.length > 0) {
@@ -377,13 +363,11 @@ export default function MapScreen({ navigation, route }) {
           setOrderedPassengers(activeStops);
         }
 
-        // 4. Decode Route
         const points = decodePolyline(routeData.overview_polyline.points);
         routeCoordsRef.current = points;
         setRouteCoords(points);
-        currentPolylineIndexRef.current = 0; // Reset index on new route
+        currentPolylineIndexRef.current = 0;
 
-        // 5. Steps & Stats
         let allSteps = [];
         routeData.legs.forEach((leg) => {
           allSteps = [...allSteps, ...leg.steps];
@@ -399,7 +383,7 @@ export default function MapScreen({ navigation, route }) {
         });
 
         if (totalSecs > 0) {
-          avgSpeedRef.current = totalMeters / 1000 / (totalSecs / 60); // km per min
+          avgSpeedRef.current = totalMeters / 1000 / (totalSecs / 60);
         }
 
         setRemainingKm(totalMeters / 1000);
@@ -415,31 +399,7 @@ export default function MapScreen({ navigation, route }) {
     [passengersToRoute, finalDestination, i18n.language, isRerouting]
   );
 
-  /* ===================== CAMERA AUTO-ZOOM ===================== */
-  useEffect(() => {
-    if (
-      isMapReady &&
-      routeCoords.length > 1 &&
-      driverLocation &&
-      mapRef.current
-    ) {
-      const initialBearing = getBearing(
-        driverLocation,
-        routeCoords[1] || routeCoords[0]
-      );
-      mapRef.current.animateCamera(
-        {
-          center: driverLocation,
-          heading: initialBearing,
-          pitch: 50,
-          zoom: 18,
-        },
-        { duration: 1500 }
-      );
-    }
-  }, [isMapReady, routeCoords, driverLocation]);
-
-  /* ===================== GPS TRACKING LOOP ===================== */
+  /* ===================== GPS TRACKING & CAMERA ===================== */
   useEffect(() => {
     if (customStartLocation) return;
 
@@ -460,12 +420,56 @@ export default function MapScreen({ navigation, route }) {
 
           setDriverLocation(pos);
 
-          // Animate Camera
-          if (mapRef.current && isMapReady && heading >= 0 && speed > 0.5) {
-            mapRef.current.animateCamera(
-              { center: pos, heading: heading, pitch: 50, zoom: 18 },
-              { duration: 1000 }
-            );
+          // --- FIXED CAMERA ROTATION LOGIC ---
+          if (mapRef.current && isMapReady) {
+            // Speed threshold (approx 5 km/h)
+            // If moving fast -> Trust GPS Heading
+            // If stopped/slow -> Trust Route Path (Look Ahead)
+            const isMoving = speed && speed > 1.5;
+
+            let newHeading = lastHeadingRef.current; // Default to last known
+
+            if (isMoving && heading >= 0) {
+              // Trust the GPS
+              newHeading = heading;
+            } else if (routeCoordsRef.current.length > 1) {
+              // We are stopped or GPS compass is noise.
+              // Look at the "Next Point" on the route to orient correctly.
+              const nextPointIndex = currentPolylineIndexRef.current + 1;
+              const targetPoint =
+                routeCoordsRef.current[nextPointIndex] ||
+                routeCoordsRef.current[1];
+
+              if (targetPoint) {
+                newHeading = getBearing(pos, targetPoint);
+              }
+            }
+
+            // Smooth Jitter: Only rotate if change > 2 degrees
+            if (Math.abs(newHeading - lastHeadingRef.current) > 2) {
+              lastHeadingRef.current = newHeading;
+
+              mapRef.current.animateCamera(
+                {
+                  center: pos,
+                  heading: newHeading,
+                  pitch: 60,
+                  zoom: 17,
+                },
+                { duration: 1000 }
+              );
+            } else {
+              // Even if we don't rotate, we must move center to follow car
+              mapRef.current.animateCamera(
+                {
+                  center: pos,
+                  heading: lastHeadingRef.current,
+                  pitch: 60,
+                  zoom: 17,
+                },
+                { duration: 1000 }
+              );
+            }
           }
 
           /* --- LOGIC 1: INSTRUCTIONS --- */
@@ -503,21 +507,15 @@ export default function MapScreen({ navigation, route }) {
             if (isOff) fetchRoute(pos);
           }
 
-          /* --- LOGIC 3: SMOOTH REMAINING DISTANCE/TIME --- */
+          /* --- LOGIC 3: SMOOTH REMAINING DISTANCE --- */
           if (routeCoordsRef.current.length > 0) {
-            // Use the new SMOOTH calculator
             const { distance, index } = calculateExactRemainingDistance(
               pos,
               routeCoordsRef.current,
               currentPolylineIndexRef.current
             );
-
-            // Update the reference index so we don't scan the whole array next time
             currentPolylineIndexRef.current = index;
-
             setRemainingKm(distance);
-
-            // Update Time proportionally based on Average Speed
             if (avgSpeedRef.current > 0) {
               setRemainingMin(distance / avgSpeedRef.current);
             }
@@ -530,7 +528,7 @@ export default function MapScreen({ navigation, route }) {
               if (d < ARRIVAL_THRESHOLD_KM) {
                 visitedRef.current.add(p.id);
                 setVisitedIds(new Set(visitedRef.current));
-                fetchRoute(pos); // Recalculate route to next stop
+                fetchRoute(pos);
               }
             }
           });
@@ -562,10 +560,13 @@ export default function MapScreen({ navigation, route }) {
   /* ===================== RENDER ===================== */
 
   const headerHeight = insets.top + 60;
+
+  // --- CAMERA PADDING TRICK ---
+  // Large TOP padding pushes the visual "Center" (the car) DOWN.
   const mapPadding = {
-    top: headerHeight + 20,
+    top: SCREEN_HEIGHT * 0.55, // Center is at bottom 45% of screen
     right: 10,
-    bottom: 240,
+    bottom: 240, // Keeps space for Dashboard
     left: 10,
   };
 
@@ -641,7 +642,7 @@ export default function MapScreen({ navigation, route }) {
         style={styles.map}
         provider={PROVIDER_GOOGLE}
         showsUserLocation={false}
-        showsCompass={true}
+        showsCompass={false}
         mapPadding={mapPadding}
         onMapReady={() => setIsMapReady(true)}
         initialRegion={
@@ -661,7 +662,6 @@ export default function MapScreen({ navigation, route }) {
 
         {driverLocation && <CarMarker coordinate={driverLocation} />}
 
-        {/* --- RENDER OPTIMIZED PASSENGERS WITH NUMBERS --- */}
         {orderedPassengers.map((p, index) => (
           <StopMarker
             key={p.id}
